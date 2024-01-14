@@ -25,4 +25,4 @@ Micro Component is a lightweight and powerful library designed to enhance jQuery
 Install Micro Component via npm:
 
 ```bash
-npm install micro-component-library
+npm i jquery-micro_component
