@@ -1,5 +1,8 @@
+import { MCcontext } from './MCcontext.js';
+import { MCState } from './MCstate.js';
+import { MCEngine } from './MCengine.js';
+
 const mc_context_global = new Set();
-const anonim_render_global = new Set();
 const mc_state_global = new Set();
 
 (function() {
@@ -282,7 +285,6 @@ class MC {
     };
 };
 
-
 class MC_Component {
     constructor(html) {
         return this.getComponent(html);
@@ -454,3 +456,5 @@ class MC_Component_Registration {
         }
     }
 };
+
+export default MC;

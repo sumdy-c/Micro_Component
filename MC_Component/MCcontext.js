@@ -54,3 +54,5 @@ class MCcontext {
         return [{ context: this.id, id_element: id }, virtualElement];
 }
 };
+
+export { MCcontext };

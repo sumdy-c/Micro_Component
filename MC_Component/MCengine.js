@@ -261,3 +261,5 @@ class MCEngine {
         state.getPassport(passport);
     };
 };
+
+export { MCEngine };

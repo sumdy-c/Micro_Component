@@ -1,5 +1,4 @@
 const mc_context_global = new Set();
-const anonim_render_global = new Set();
 const mc_state_global = new Set();
 
 (function () {
