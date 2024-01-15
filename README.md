@@ -1,6 +1,5 @@
 # Micro Component Library
-
-[![GitHub license](https://img.shields.io/badge/license-MIT-blue.svg)](https://github.com/your-username/micro-component/LICENSE)
+[![GitHub license](https://img.shields.io/badge/license-MIT-blue.svg)](https://github.com/sumdy-c/Micro_Component/LICENSE)
 [![GitHub stars](https://img.shields.io/github/stars/your-username/micro-component.svg)](https://github.com/your-username/micro-component/stargazers)
 [![GitHub issues](https://img.shields.io/github/issues/your-username/micro-component.svg)](https://github.com/your-username/micro-component/issues)
 
