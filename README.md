@@ -17,4 +17,4 @@ Install Micro Component via npm:
 ```bash
 npm i jquery-micro_component
 ```
-or see the documentation for a full understanding of the installation
+or see the <a href ='https://sumdy-c.github.io/MC_Documentation/'>documentation</a> for a full understanding of the installation
