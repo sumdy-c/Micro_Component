@@ -1,139 +1,140 @@
-import { MCcontext } from './MCcontext.js';
-import { MCState } from './MCstate.js';
-import { MCEngine } from './MCengine.js';
-
-const mc_context_global = new Set();
-const mc_state_global = new Set();
-
-(function() {
-    var original$ = window.$;
-    window.$ = function() {
-        // компонент класса
-        if(arguments[0].prototype instanceof MC) {
-
-            if(MCEngine.active) {
-                const result = MCEngine.renderChilds_Component(...arguments);
-                if(result !== 'nt%Rnd#el') {
-                    return result;
-                }
-            };
-
-            if(typeof arguments[1] === 'string') {
-                if(MC.keys.some(el_key => el_key === arguments[1])) {
-                    console.error(`[MC] Обнаружено повторение ключа "${arguments[1]}" для компонента ${arguments[0].name}`);
-                }
-            } else {
-                if(MC.keys.some(el_key => el_key === arguments[2])) {
-                    console.error(`[MC] Обнаружено повторение ключа "${arguments[2]}" для компонента ${arguments[0].name}`);
-                }
-            };
-
-            return new MC_Component(new MC_Component_Registration(arguments));
-        };
-
-        // Если вызов производит функция или jquery
-        const [ arg1, arg2, arg3 ] = arguments;
-        if(typeof arg1 === 'function') {
-            if(MCEngine.active) {
-                const result = MCEngine.renderChilds_FC(arg3, arg1);
-                if(result !== 'nt%Rnd#el') {
-                    return result;
-                }
-            };
-
-            if(arg3) {
-                const id = MC.uuidv4();
-                const [virtual, NativeVirtual] = arg3.createVirtual_FC(arg1, id);
-                const values = [];
-                arg2 && arg2.map((state) => {
-                    if(state.__proto__.constructor.name === "MCState") {
-                        state.virtualCollection.add(virtual);
-                        values.push(state.value);
-                    } else {
-                        console.warn('Не стейт');
-                    }
-                });
-        
-                const node = arg1(values);
-                
-                if(!node) {
-                    const micro_component = document.createElement('micro_component');
-                    try {
-                        micro_component.setAttribute("style", "height: 0; width: 0; display: none;");
-                        micro_component.setAttribute("mc", arg3.id);  
-                    } catch (error) {
-                        console.error('[MC] Попытка формирования элемента закончилась неудачно, возможно пытаетесь отдать под контроль элемент, который уже чем-то контролируется.')
-                    }
-                    NativeVirtual.controller = arg2;
-                    NativeVirtual.HTMLElement = micro_component;
-                    return micro_component;
-                }
-
-                try {
-                    node[0].setAttribute("mc", arg3.id);
-                } catch (error) {
-                    console.error('[MC] Попытка формирования элемента закончилась неудачно, возможно пытаетесь отдать под контроль элемент, который уже чем-то контролируется.')
-                }
-                NativeVirtual.controller = arg2;
-                NativeVirtual.HTMLElement = node[0];
-                return node[0];
-            } else {
-                const creatorAnon = arg1;
-                const dependencyAnon = arg2;
-
-                const id = MC.uuidv4();
-                const [virtual, NativeVirtual] = MC.createAnonim_FC(creatorAnon, id);
-                const arg = [];
-
-                dependencyAnon && dependencyAnon.map((state) => {
-                    if(state.__proto__.constructor.name === "MCState") {
-                        state.virtualCollection.add(virtual);
-                        arg.push(state.value);
-                    } else {
-                        console.warn('Не стейт')
-                    }
-                });
-
-                const node = creatorAnon(arg);
-
-                if(!node) {
-                    const micro_component = document.createElement('micro_component');
-                    try {
-                        micro_component.setAttribute("style", "height: 0; width: 0; display: none;");
-                        micro_component.setAttribute("mc", 'anon');   
-                    } catch (error) {
-                        console.error('[MC] Попытка формирования элемента может закончится неудачей, возможно пытаетесь отдать под контроль элемент, который уже контролируется.')
-                    }
-                    NativeVirtual.controller = dependencyAnon;
-                    NativeVirtual.HTMLElement = micro_component;
-                    return micro_component;
-                }
-
-                try {
-                    node[0].setAttribute("mc", 'anon');   
-                } catch (error) {
-                    console.error('[MC] Попытка формирования элемента закончилась неудачно, возможно пытаетесь отдать под контроль элемент, который уже чем-то контролируется.')
-                }
-
-                NativeVirtual.controller = dependencyAnon;
-                NativeVirtual.HTMLElement = node[0];
-                return node[0];
-                        
-            }
-        }
-
-        let resultCall = original$.apply(this, arguments);
-
-        return resultCall;
-    };
-})();
-
 class MC {
     static keys = [];
+    static mc_state_global = new Set();
+    static mc_context_global = new Set();
+    
     constructor() {
         if (MC._instance) {
             return MC._instance;
         }
+    }
+
+    static init() {
+        (function() {
+            var original$ = window.$;
+        
+            console.log('window.$');
+            console.log(window.$);
+            window.$ = function() {
+                // компонент класса
+                if(arguments[0].prototype instanceof MC) {
+        
+                    if(MCEngine.active) {
+                        const result = MCEngine.renderChilds_Component(...arguments);
+                        if(result !== 'nt%Rnd#el') {
+                            return result;
+                        }
+                    };
+        
+                    if(typeof arguments[1] === 'string') {
+                        if(MC.keys.some(el_key => el_key === arguments[1])) {
+                            console.error(`[MC] Обнаружено повторение ключа "${arguments[1]}" для компонента ${arguments[0].name}`);
+                        }
+                    } else {
+                        if(MC.keys.some(el_key => el_key === arguments[2])) {
+                            console.error(`[MC] Обнаружено повторение ключа "${arguments[2]}" для компонента ${arguments[0].name}`);
+                        }
+                    };
+        
+                    return new MC_Component(new MC_Component_Registration(arguments));
+                };
+        
+                // Если вызов производит функция или jquery
+                const [ arg1, arg2, arg3 ] = arguments;
+                if(typeof arg1 === 'function') {
+                    if(MCEngine.active) {
+                        const result = MCEngine.renderChilds_FC(arg3, arg1);
+                        if(result !== 'nt%Rnd#el') {
+                            return result;
+                        }
+                    };
+        
+                    if(arg3) {
+                        const id = MC.uuidv4();
+                        const [virtual, NativeVirtual] = arg3.createVirtual_FC(arg1, id);
+                        const values = [];
+                        arg2 && arg2.map((state) => {
+                            if(state.__proto__.constructor.name === "MCState") {
+                                state.virtualCollection.add(virtual);
+                                values.push(state.value);
+                            } else {
+                                console.warn('Не стейт');
+                            }
+                        });
+                
+                        const node = arg1(values);
+                        
+                        if(!node) {
+                            const micro_component = document.createElement('micro_component');
+                            try {
+                                micro_component.setAttribute("style", "height: 0; width: 0; display: none;");
+                                micro_component.setAttribute("mc", arg3.id);  
+                            } catch (error) {
+                                console.error('[MC] Попытка формирования элемента закончилась неудачно, возможно пытаетесь отдать под контроль элемент, который уже чем-то контролируется.')
+                            }
+                            NativeVirtual.controller = arg2;
+                            NativeVirtual.HTMLElement = micro_component;
+                            return micro_component;
+                        }
+        
+                        try {
+                            node[0].setAttribute("mc", arg3.id);
+                        } catch (error) {
+                            console.error('[MC] Попытка формирования элемента закончилась неудачно, возможно пытаетесь отдать под контроль элемент, который уже чем-то контролируется.')
+                        }
+                        NativeVirtual.controller = arg2;
+                        NativeVirtual.HTMLElement = node[0];
+                        return node[0];
+                    } else {
+                        const creatorAnon = arg1;
+                        const dependencyAnon = arg2;
+        
+                        const id = MC.uuidv4();
+                        const [virtual, NativeVirtual] = MC.createAnonim_FC(creatorAnon, id);
+                        const arg = [];
+        
+                        dependencyAnon && dependencyAnon.map((state) => {
+                            if(state.__proto__.constructor.name === "MCState") {
+                                state.virtualCollection.add(virtual);
+                                arg.push(state.value);
+                            } else {
+                                console.warn('Не стейт')
+                            }
+                        });
+        
+                        const node = creatorAnon(arg);
+        
+                        if(!node) {
+                            const micro_component = document.createElement('micro_component');
+                            try {
+                                micro_component.setAttribute("style", "height: 0; width: 0; display: none;");
+                                micro_component.setAttribute("mc", 'anon');   
+                            } catch (error) {
+                                console.error('[MC] Попытка формирования элемента может закончится неудачей, возможно пытаетесь отдать под контроль элемент, который уже контролируется.')
+                            }
+                            NativeVirtual.controller = dependencyAnon;
+                            NativeVirtual.HTMLElement = micro_component;
+                            return micro_component;
+                        }
+        
+                        try {
+                            node[0].setAttribute("mc", 'anon');   
+                        } catch (error) {
+                            console.error('[MC] Попытка формирования элемента закончилась неудачно, возможно пытаетесь отдать под контроль элемент, который уже чем-то контролируется.')
+                        }
+        
+                        NativeVirtual.controller = dependencyAnon;
+                        NativeVirtual.HTMLElement = node[0];
+                        return node[0];
+                                
+                    }
+                }
+        
+                let resultCall = original$.apply(this, arguments);
+        
+                return resultCall;
+            };
+        })();
     }
 
     static anonimCollection = new Set(); 
@@ -217,7 +218,7 @@ class MC {
 
         new MCEngine().registrController(state);
 
-        mc_state_global.add(state);
+        MC.mc_state_global.add(state);
         
         return state;
     };
@@ -233,7 +234,7 @@ class MC {
 
         new MCEngine().registrController(state);
 
-        mc_state_global.add(state);
+        MC.mc_state_global.add(state);
         
         return state;
     };
@@ -246,7 +247,7 @@ class MC {
 
         const context = new MCcontext(contextParam);
 
-        mc_context_global.add(context);
+        MC.mc_context_global.add(context);
 
         return context;
     };
@@ -266,7 +267,7 @@ class MC {
 
     static getState(id) {
         const state = [];
-        mc_state_global.forEach(item => {
+        MC.mc_state_global.forEach(item => {
             if(item.key === id) {
                 state.push(item);
             }
@@ -276,7 +277,7 @@ class MC {
 
     static getContext() {
         let context;
-        mc_context_global.forEach(item => {
+        MC.mc_context_global.forEach(item => {
             if(item.id === id){
                 context = item;
             }
@@ -330,7 +331,7 @@ class MC_Component_Registration {
 
             const locally_states = [];
 
-            mc_state_global.forEach(item => {
+            MC.mc_state_global.forEach(item => {
                 if(item.local && item.local === mc_component) {
                     locally_states.push(item);
                 }
@@ -394,7 +395,7 @@ class MC_Component_Registration {
 
             const locally_states = [];
 
-            mc_state_global.forEach(item => {
+            MC.mc_state_global.forEach(item => {
                 if(item.local && item.local === mc_component) {
                     locally_states.push(item);
                 }
@@ -456,5 +457,3 @@ class MC_Component_Registration {
         }
     }
 };
-
-export default MC;

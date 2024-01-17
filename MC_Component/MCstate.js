@@ -56,5 +56,3 @@ class MCState {
     }
 
 };
-
-export { MCState };

@@ -65,7 +65,7 @@ class MCEngine {
                 return;
             };
 
-            mc_context_global.forEach(context => {
+            MC.mc_context_global.forEach(context => {
                 if(context.id === virtualData.context) {
                     context.virtualCollection.forEach(virtualEl => {
                         if(virtualEl.key === virtualData.id_element) {
@@ -261,5 +261,3 @@ class MCEngine {
         state.getPassport(passport);
     };
 };
-
-export { MCEngine };
