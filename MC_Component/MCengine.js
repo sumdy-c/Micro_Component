@@ -249,7 +249,6 @@ class MCEngine {
                         local_values.push(controller.value);
                     });
     
-    
                     let newNode = virtual.component.render({ global: global_values, local: local_values }, service.props, virtual.props);
                     if(!newNode) {
                         newNode = MC_Component.createEmptyElement();

@@ -178,7 +178,7 @@ class MCEngine {
                             newNode = virtualEl.Fn(values);
                             if(!newNode) {
                                 newNode = MC_Component.createEmptyElement();
-                            } else if (Array.isArray(newNode)){
+                            } else if (newNode.length){
                                 newNode = newNode[0];
                             }
                         }
@@ -349,7 +349,7 @@ class MCEngine {
         };
 
         service.context.virtualCollection.forEach(virtual => {
-            if(!virtual.Fn){
+            if(!virtual.Fn) {
                 if(virtual.identifier === key) {
                     finder = true;
     
@@ -370,7 +370,9 @@ class MCEngine {
                     if(!newNode) {
                         newNode = MC_Component.createEmptyElement();
                     } else {
-                        newNode = newNode[0];
+                        if(newNode.length) {
+                            newNode = newNode[0];
+                        }
                     }
                     virtual.HTMLElement = newNode;
                     node = virtual.HTMLElement;
@@ -494,15 +496,19 @@ class MC_Component_Registration {
 
             let global_st = service.states ? service.states : [];
             let local_st = locally_states ? locally_states : [];
-            try {
-                node[0].setAttribute("mc", service.context.id);
-            } catch (error) {
-                console.error('[MC] Попытка формирования элемента закончилась неудачно, возможно пытаетесь отдать под контроль элемент, который уже чем-то контролируется.')
-            }
 
-            NativeVirtual.controller = { global: global_st, local: local_st };
-            NativeVirtual.HTMLElement = node[0];
-            return node[0];
+            
+            if(node.length) {
+                node[0].setAttribute("mc", true);
+                NativeVirtual.controller = { global: global_st, local: local_st };
+                NativeVirtual.HTMLElement = node[0];
+                return node[0];
+            } else {
+                node.setAttribute("mc", true);
+                NativeVirtual.controller = { global: global_st, local: local_st };
+                NativeVirtual.HTMLElement = node;
+                return node;
+            }
         } else {
             const mc_component = new component(service.props, service.context);
 
@@ -551,15 +557,18 @@ class MC_Component_Registration {
 
             let global_st = service.states ? service.states : [];
             let local_st = locally_states ? locally_states : [];
-    
-            try {
-                node[0].setAttribute("mc", 'anon');  
-            } catch (error) {
-                console.error('[MC] Попытка формирования элемента закончилась неудачно, возможно пытаетесь отдать под контроль элемент, который уже чем-то контролируется.')
+
+            if(node.length) {
+                node[0].setAttribute("mc", true);
+                NativeVirtual.controller = { global: global_st, local: local_st };
+                NativeVirtual.HTMLElement = node[0];
+                return node[0];
+            } else {
+                node.setAttribute("mc", true);
+                NativeVirtual.controller = { global: global_st, local: local_st };
+                NativeVirtual.HTMLElement = node;
+                return node;
             }
-            NativeVirtual.controller = { global: global_st, local: local_st };
-            NativeVirtual.HTMLElement = node[0];
-            return node[0];
         }
     }
 };
@@ -587,15 +596,15 @@ class MC {
                         }
                     };
       
-                    if(typeof arguments[1] === 'string') {
-                        if(MC.keys.some(el_key => el_key === arguments[1])) {
-                            console.error(`[MC] Обнаружено повторение ключа "${arguments[1]}" для компонента ${arguments[0].name}`);
-                        }
-                    } else {
-                        if(MC.keys.some(el_key => el_key === arguments[2])) {
-                            console.error(`[MC] Обнаружено повторение ключа "${arguments[2]}" для компонента ${arguments[0].name}`);
-                        }
-                    };
+                    // if(typeof arguments[1] === 'string') {
+                    //     if(MC.keys.some(el_key => el_key === arguments[1])) {
+                    //         console.error(`[MC] Обнаружено повторение ключа "${arguments[1]}" для компонента ${arguments[0].name}`);
+                    //     }
+                    // } else {
+                    //     if(MC.keys.some(el_key => el_key === arguments[2])) {
+                    //         console.error(`[MC] Обнаружено повторение ключа "${arguments[2]}" для компонента ${arguments[0].name}`);
+                    //     }
+                    // };
       
                   return new MC_Component(new MC_Component_Registration(arguments));
               };
@@ -631,14 +640,17 @@ class MC {
                           return micro_component;
                         }
       
-                      try {
-                          node[0].setAttribute("mc", arg3.id);
-                      } catch (error) {
-                          console.error('[MC] Попытка формирования элемента закончилась неудачно, возможно пытаетесь отдать под контроль элемент, который уже чем-то контролируется.')
-                      }
-                      NativeVirtual.controller = arg2;
-                      NativeVirtual.HTMLElement = node[0];
-                      return node[0];
+                        if(node.length) {
+                            node[0].setAttribute("mc", true);
+                            NativeVirtual.controller = arg2;
+                            NativeVirtual.HTMLElement = node[0];
+                            return node[0];
+                        } else {
+                            node.setAttribute("mc", true);
+                            NativeVirtual.controller = { global: global_st, local: local_st };
+                            NativeVirtual.HTMLElement = node;
+                            return node;
+                        }
                   } else {
                       const creatorAnon = arg1;
                       const dependencyAnon = arg2;
@@ -665,13 +677,13 @@ class MC {
                           return micro_component;
                       }
       
-                    if(Array.isArray(node)) {
-                        node[0].setAttribute("mc", 'anon');
+                    if(node.length) {
+                        node[0].setAttribute("mc", true);
                         NativeVirtual.controller = dependencyAnon;
                         NativeVirtual.HTMLElement = node[0];
                         return node[0]; 
                     } else {
-                        node.setAttribute("mc", 'anon');
+                        node.setAttribute("mc", true);
                         NativeVirtual.controller = dependencyAnon;
                         NativeVirtual.HTMLElement = node;
                         return node; 
