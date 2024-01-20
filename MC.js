@@ -115,439 +115,453 @@ class MCState {
 };
 
 class MCEngine {
-  state;
-  static active = false;
-  constructor() {};
+    state;
+    static active = false;
+    constructor() {};
 
-  handlerRender(target, fn, path) {
-  let tree = {};
-  if (!path) {
-    path = 'obj';
-  }
-  const proxy = new Proxy(target, {
-    get: (_, prop) => {
-      if (typeof target[prop] != 'object') {
-        return target[prop];
-      }
-      if (tree[prop] === undefined) {
-        tree[prop] = this.handlerRender(target[prop], fn, `${path}.${prop}`);
-      }
-      return Reflect.get(...arguments);
-    },
-    set: (_, prop, val) => {     
-              fn(this.state);
-              return target[prop];
-          },
-  });
-  return proxy;
-}
+    handlerRender(target, fn, path) {
+		let tree = {};
+		if (!path) {
+			path = 'obj';
+		}
+		const proxy = new Proxy(target, {
+			get: (_, prop) => {
+				if (typeof target[prop] != 'object') {
+					return target[prop];
+				}
+				if (tree[prop] === undefined) {
+					tree[prop] = this.handlerRender(target[prop], fn, `${path}.${prop}`);
+				}
+				return Reflect.get(...arguments);
+			},
+			set: (_, prop, val) => {     
+                fn(this.state);
+                return target[prop];
+            },
+		});
+		return proxy;
+	}
 
-  render(state) {
-      if(state.virtualCollection.length === 0) {
-          return null;
-      };
-      MCEngine.active = true;
-      state.virtualCollection.forEach(virtualData => {
-          if(!virtualData.context) {
-              MC.anonimCollection.forEach(virtualEl => {
-                  if(virtualEl.key === virtualData.id_element) {
-                      let newNode;
-                      if(virtualEl.component) {
+    render(state) {
+        if(state.virtualCollection.length === 0) {
+            return null;
+        };
+        MCEngine.active = true;
+        state.virtualCollection.forEach(virtualData => {
+            if(!virtualData.context) {
+                MC.anonimCollection.forEach(virtualEl => {
+                    if(virtualEl.key === virtualData.id_element) {
+                        let newNode;
+                        if(virtualEl.component) {
 
-                          const global_values = [];
-                          virtualEl.controller.global.forEach(controller => {
-                              global_values.push(controller.value);
-                          });
+                            const global_values = [];
+                            virtualEl.controller.global.forEach(controller => {
+                                global_values.push(controller.value);
+                            });
 
-                          const local_values = [];
-                          virtualEl.controller.local.forEach(controller => {
-                              local_values.push(controller.value);
-                          });
-                          newNode = virtualEl.component.render({ global: global_values, local: local_values }, virtualEl.props)[0];
-                      } else {
-                          const values = [];
-                          virtualEl.controller.forEach(controller => {
-                              values.push(controller.value);
-                          });
+                            const local_values = [];
+                            virtualEl.controller.local.forEach(controller => {
+                                local_values.push(controller.value);
+                            });
+                            newNode = virtualEl.component.render({ global: global_values, local: local_values }, virtualEl.props);
+                            if(!newNode) {
+                                newNode = MC_Component.createEmptyElement();
+                            } else {
+                                newNode = newNode[0];
+                            }
+                        } else {
+                            const values = [];
+                            virtualEl.controller.forEach(controller => {
+                                values.push(controller.value);
+                            });
 
-                          newNode = virtualEl.Fn(values)[0];
-                      }
-                      virtualEl.HTMLElement.replaceWith(newNode);
-                      virtualEl.HTMLElement = newNode;
-                  }
-              });
+                            newNode = virtualEl.Fn(values);
+                            if(!newNode) {
+                                newNode = MC_Component.createEmptyElement();
+                            } else {
+                                newNode = newNode[0];
+                            }
+                        }
+                        virtualEl.HTMLElement.replaceWith(newNode);
+                        virtualEl.HTMLElement = newNode;
+                    }
+                });
 
-              MCEngine.active = false;
-              return;
-          };
+                MCEngine.active = false;
+                return;
+            };
 
-          MC.mc_context_global.forEach(context => {
-              if(context.id === virtualData.context) {
-                  context.virtualCollection.forEach(virtualEl => {
-                      if(virtualEl.key === virtualData.id_element) {
-                          let newNode;
-                          if(virtualEl.component) {
+            MC.mc_context_global.forEach(context => {
+                if(context.id === virtualData.context) {
+                    context.virtualCollection.forEach(virtualEl => {
+                        if(virtualEl.key === virtualData.id_element) {
+                            let newNode;
+                            if(virtualEl.component) {
 
-                              const global_values = [];
-                              virtualEl.controller.global.forEach(controller => {
-                                  global_values.push(controller.value);
-                              });
+                                const global_values = [];
+                                virtualEl.controller.global.forEach(controller => {
+                                    global_values.push(controller.value);
+                                });
 
-                              const local_values = [];
-                              virtualEl.controller.local.forEach(controller => {
-                                  local_values.push(controller.value);
-                              });
+                                const local_values = [];
+                                virtualEl.controller.local.forEach(controller => {
+                                    local_values.push(controller.value);
+                                });
 
-                              newNode = virtualEl.component.render({ global: global_values, local: local_values }, virtualEl.props)[0];
-                          } else {
-                              const values = [];
-                              virtualEl.controller.forEach(controller => {
-                                  values.push(controller.value);
-                              });
+                                newNode = virtualEl.component.render({ global: global_values, local: local_values }, virtualEl.props);
 
-                              newNode = virtualEl.Fn(values)[0];
-                          }
-                          
-                          virtualEl.HTMLElement.replaceWith(newNode);
-                          virtualEl.HTMLElement = newNode;
-                      }
-                  })
-              }
-          })
-      });
+                                if(!newNode) {
+                                    newNode = MC_Component.createEmptyElement();
+                                } else {
+                                    newNode = newNode[0];
+                                }
+                            } else {
+                                const values = [];
+                                virtualEl.controller.forEach(controller => {
+                                    values.push(controller.value);
+                                });
 
-      MCEngine.active = false;
-      return;
-  };
+                                newNode = virtualEl.Fn(values);
 
-  static renderChilds_FC(context, creator) {
-      let node = null;
-      let finder = false;
+                                if(!newNode) {
+                                    newNode = MC_Component.createEmptyElement();
+                                } else {
+                                    newNode = newNode[0];
+                                }
+                            }
+                            
+                            virtualEl.HTMLElement.replaceWith(newNode);
+                            virtualEl.HTMLElement = newNode;
+                        }
+                    })
+                }
+            })
+        });
 
-      if(!context) {
-          MC.anonimCollection.forEach(virtual => {
-              if(!virtual.component) {
-                  if(virtual.Fn.toString() === creator.toString()) {
-                      finder = true;
-                      const values = [];
-                      virtual.controller.forEach(controller => {
-                          values.push(controller.value);
-                      });
-      
-                      let newNode = virtual.Fn(values);
-                      if(!newNode) {
-                          newNode = [];
-                          newNode[0] = document.createElement('micro_component');
-                          newNode[0].setAttribute("style", "height: 0; width: 0; display: none;");
-                          newNode[0].setAttribute("mc", 'anon');
-                      }
-                      virtual.HTMLElement = newNode[0];
-                      node = virtual.HTMLElement;
-                  }
-              }
-          });
-          if(!finder) {
-              return 'nt%Rnd#el';
-          }
-          return node;
-      }
+        MCEngine.active = false;
+        return;
+    };
 
-      context.virtualCollection.forEach(virtual => {
-          if(!virtual.component) {
-              if(virtual.Fn.toString() === creator.toString()) {
-                  finder = true;
-                  const values = [];
-                  virtual.controller.forEach(controller => {
-                      values.push(controller.value);
-                  });
-  
-                  let newNode = virtual.Fn(values);
-                  if(!newNode) {
-                      newNode = [];
-                      newNode[0] = document.createElement('micro_component');
-                      newNode[0].setAttribute("style", "height: 0; width: 0; display: none;");
-                      newNode[0].setAttribute("mc", context.id);
-                  }
-                  virtual.HTMLElement = newNode[0];
-                  node = virtual.HTMLElement;
-              }
-          }
-      });
-      if(!finder) {
-          return 'nt%Rnd#el';
-      }
-      return node;
-  }
+    static renderChilds_FC(context, creator) {
+        let node = null;
+        let finder = false;
 
-  static renderChilds_Component(component, props, key) {
-      if(!props) {
-          console.error('[MC] Передайте при создании компонента его ключ! При отсутствии ключа, компонент может быть утерян!')
-          return 'nt%Rnd#el';
-      }
-      if(typeof props === 'string') {
-          key = props;
-      };
+        if(!context) {
+            MC.anonimCollection.forEach(virtual => {
+                if(!virtual.component) {
+                    if(virtual.Fn.toString() === creator.toString()) {
+                        finder = true;
+                        const values = [];
+                        virtual.controller.forEach(controller => {
+                            values.push(controller.value);
+                        });
+        
+                        let newNode = virtual.Fn(values);
+                        if(!newNode) {
+                            newNode = MC_Component.createEmptyElement();
+                        } else {
+                            newNode = newNode[0]
+                        }
+                        virtual.HTMLElement = newNode;
+                        node = virtual.HTMLElement;
+                    }
+                }
+            });
+            if(!finder) {
+                return 'nt%Rnd#el';
+            }
+            return node;
+        }
 
-      const [ prop, service ] = props;
+        context.virtualCollection.forEach(virtual => {
+            if(!virtual.component) {
+                if(virtual.Fn.toString() === creator.toString()) {
+                    finder = true;
+                    const values = [];
+                    virtual.controller.forEach(controller => {
+                        values.push(controller.value);
+                    });
+    
+                    let newNode = virtual.Fn(values);
+                    if(!newNode) {
+                        newNode = MC_Component.createEmptyElement();
+                    } else {
+                        newNode = newNode[0]
+                    }
+                    virtual.HTMLElement = newNode;
+                    node = virtual.HTMLElement;
+                }
+            }
+        });
+        if(!finder) {
+            return 'nt%Rnd#el';
+        }
+        return node;
+    }
 
-      let node = null;
-      let finder = false;
+    static renderChilds_Component(component, props, key) {
+        if(!props) {
+            console.error('[MC] Передайте при создании компонента его ключ! При отсутствии ключа, компонент может быть утерян!')
+            return 'nt%Rnd#el';
+        }
+        if(typeof props === 'string') {
+            key = props;
+        };
 
-      if(!service.context) {
-          MC.anonimCollection.forEach(virtual => {
-              if(!virtual.Fn){
-                  if(virtual.identifier === key) {
-                      finder = true;
-  
-                      const global_values = [];
-  
-                      virtual.controller.global.forEach(controller => {
-                          global_values.push(controller.value);
-                      });
-                      const local_values = [];
-  
-                      virtual.controller.local.forEach(controller => {
-                          local_values.push(controller.value);
-                      });
-  
-                      let newNode = virtual.component.render({ global: global_values, local: local_values }, service.props, virtual.props);
-  
-                      if(!newNode) {
-                          newNode = [];
-                          newNode[0] = document.createElement('micro_component');
-                          newNode[0].setAttribute("style", "height: 0; width: 0; display: none;");
-                          newNode[0].setAttribute("mc", 'anon');
-                      }
-                      virtual.HTMLElement = newNode[0];
-                      node = virtual.HTMLElement;
-                  }
-              }
-          });
-          if(!finder) {
-              return 'nt%Rnd#el';
-          }
-          return node;
-      };
+        const [ prop, service ] = props;
 
-      service.context.virtualCollection.forEach(virtual => {
-          if(!virtual.Fn){
-              if(virtual.identifier === key) {
-                  finder = true;
-  
-                  const global_values = [];
-                  
-                  virtual.controller.global.forEach(controller => {
-                      global_values.push(controller.value);
-                  });
-  
-                  const local_values = [];
-                  
-                  virtual.controller.local.forEach(controller => {
-                      local_values.push(controller.value);
-                  });
-  
-  
-                  let newNode = virtual.component.render({ global: global_values, local: local_values }, service.props, virtual.props);
-                  if(!newNode) {
-                      newNode = [];
-                      newNode[0] = document.createElement('micro_component');
-                      newNode[0].setAttribute("style", "height: 0; width: 0; display: none;");
-                      newNode[0].setAttribute("mc", context.id);
-                  }
-                  virtual.HTMLElement = newNode[0];
-                  node = virtual.HTMLElement;
-              }
-          }
-      });
+        let node = null;
+        let finder = false;
 
-      if(!finder) {
-          return 'nt%Rnd#el';
-      }
-      return node;
-  }
+        if(!service.context) {
+            MC.anonimCollection.forEach(virtual => {
+                if(!virtual.Fn){
+                    if(virtual.identifier === key) {
+                        finder = true;
+    
+                        const global_values = [];
+    
+                        virtual.controller.global.forEach(controller => {
+                            global_values.push(controller.value);
+                        });
+                        const local_values = [];
+    
+                        virtual.controller.local.forEach(controller => {
+                            local_values.push(controller.value);
+                        });
+    
+                        let newNode = virtual.component.render({ global: global_values, local: local_values }, service.props, virtual.props);
+    
+                        if(!newNode) {
+                            newNode = MC_Component.createEmptyElement();
+                        } else {
+                            newNode = newNode[0];
+                        }
+                        virtual.HTMLElement = newNode;
+                        node = virtual.HTMLElement;
+                    }
+                }
+            });
+            if(!finder) {
+                return 'nt%Rnd#el';
+            }
+            return node;
+        };
 
-  registrController(state) {
-      this.state = state;
-      const objectVirtualController = {
-          value: state.id
-      }
-      
-      const passport = this.handlerRender(objectVirtualController, this.render, '');
+        service.context.virtualCollection.forEach(virtual => {
+            if(!virtual.Fn){
+                if(virtual.identifier === key) {
+                    finder = true;
+    
+                    const global_values = [];
+                    
+                    virtual.controller.global.forEach(controller => {
+                        global_values.push(controller.value);
+                    });
+    
+                    const local_values = [];
+                    
+                    virtual.controller.local.forEach(controller => {
+                        local_values.push(controller.value);
+                    });
+    
+    
+                    let newNode = virtual.component.render({ global: global_values, local: local_values }, service.props, virtual.props);
+                    if(!newNode) {
+                        newNode = MC_Component.createEmptyElement();
+                    } else {
+                        newNode = newNode[0];
+                    }
+                    virtual.HTMLElement = newNode;
+                    node = virtual.HTMLElement;
+                }
+            }
+        });
 
-      state.getPassport(passport);
-  };
+        if(!finder) {
+            return 'nt%Rnd#el';
+        }
+        return node;
+    }
+
+    registrController(state) {
+        this.state = state;
+        const objectVirtualController = {
+            value: state.id
+        }
+        
+        const passport = this.handlerRender(objectVirtualController, this.render, '');
+
+        state.getPassport(passport);
+    };
 };
 
 class MC_Component {
-  constructor(html) {
-      return this.getComponent(html);
-  }
+    constructor(html) {
+        return this.getComponent(html);
+    }
 
-  getComponent(HTML) {
-      return HTML;
-  }
+    static createEmptyElement() {
+        const micro_component = document.createElement('micro_component');
+    
+        micro_component.setAttribute("style", "height: 0; width: 0; display: none;");
+        micro_component.setAttribute("mc", true);
+
+        return micro_component;
+    }
+
+    getComponent(HTML) {
+        return HTML;
+    }
 
 };
 
 class MC_Component_Registration {
-  constructor(newComponent) {
-      let [ComponentClass, componentArgs, key] = newComponent;
+    constructor(newComponent) {
+        let [ComponentClass, componentArgs, key] = newComponent;
 
-      if(typeof componentArgs === 'string') {
-          key = componentArgs;
-          componentArgs = null;
-      };
+        if(typeof componentArgs === 'string') {
+            key = componentArgs;
+            componentArgs = null;
+        };
 
-      let args = componentArgs;
-      if(!componentArgs) {
-          args = [ null, {
-                  context: null,
-                  props: null,
-                  states: null,
-              }
-          ];
-      }
+        let args = componentArgs;
+        if(!componentArgs) {
+            args = [ null, {
+                    context: null,
+                    props: null,
+                    states: null,
+                }
+            ];
+        }
 
-      MC.keys.push(key);
+        MC.keys.push(key);
 
-      return this.register(ComponentClass, args, key);
-       
-  };
+        return this.register(ComponentClass, args, key);
+         
+    };
 
-  register(component, componentArgs, key) {
+    register(component, componentArgs, key) {
 
-      const [ props, service ] = componentArgs;
+        const [ props, service ] = componentArgs;
 
-      if(service.context) {
-          const mc_component = new component(service.props, service.context);
+        if(service.context) {
+            const mc_component = new component(service.props, service.context);
 
-          const locally_states = [];
+            const locally_states = [];
 
-          MC.mc_state_global.forEach(item => {
-              if(item.local && item.local === mc_component) {
-                  locally_states.push(item);
-              }
-          });
+            MC.mc_state_global.forEach(item => {
+                if(item.local && item.local === mc_component) {
+                    locally_states.push(item);
+                }
+            });
 
-          const id = MC.uuidv4();
-          const [virtual, NativeVirtual] = service.context.createVirtual_Component(mc_component, id, key);
+            const id = MC.uuidv4();
+            const [virtual, NativeVirtual] = service.context.createVirtual_Component(mc_component, id, key);
 
-          const global_state = [];
+            const global_state = [];
 
-          service.states && service.states.map((state) => {
-              if(state.__proto__.constructor.name === "MCState") {
-                  state.virtualCollection.add(virtual);
-                  global_state.push(state.value);
-              } else {
-                  console.error('[MC] Ошибка обработки объекта контролёра.');
-              }
-          });
+            service.states && service.states.map((state) => {
+                if(state.__proto__.constructor.name === "MCState") {
+                    state.virtualCollection.add(virtual);
+                    global_state.push(state.value);
+                } else {
+                    console.error('[MC] Ошибка обработки объекта контролёра.');
+                }
+            });
 
-          const local_state = [];
+            const local_state = [];
 
-          locally_states && locally_states.map((state) => {
-              if(state.__proto__.constructor.name === "MCState") {
-                  state.virtualCollection.add(virtual);
-                  local_state.push(state.value);
-              } else {
-                  console.error('[MC] Ошибка обработки объекта контролёра.');
-              }
-          });
+            locally_states && locally_states.map((state) => {
+                if(state.__proto__.constructor.name === "MCState") {
+                    state.virtualCollection.add(virtual);
+                    local_state.push(state.value);
+                } else {
+                    console.error('[MC] Ошибка обработки объекта контролёра.');
+                }
+            });
 
-          NativeVirtual.props = service.props;
+            NativeVirtual.props = service.props;
 
-          const node = mc_component.render({ global: global_state, local: local_state }, service.props, service.props);
-          
-          if(!node) {
-              const micro_component = document.createElement('micro_component');
-              try {
-                  micro_component.setAttribute("style", "height: 0; width: 0; display: none;");
-                  micro_component.setAttribute("mc", service.context.id);
-              } catch (error) {
-                  console.error('[MC] Попытка формирования элемента закончилась неудачно, возможно пытаетесь отдать под контроль элемент, который уже чем-то контролируется.')
-              }
-              NativeVirtual.controller = { global: service.states, local: locally_states };
-              NativeVirtual.HTMLElement = micro_component;
-              return micro_component;
-          };
+            const node = mc_component.render({ global: global_state, local: local_state }, service.props, service.props);
+            
+            if(!node) {
+                const micro_component = MC_Component.createEmptyElement();
+                NativeVirtual.controller = { global: service.states, local: locally_states };
+                NativeVirtual.HTMLElement = micro_component;
+                return micro_component;
+            };
 
-          let global_st = service.states ? service.states : [];
-          let local_st = locally_states ? locally_states : [];
-          try {
-              node[0].setAttribute("mc", service.context.id);
-          } catch (error) {
-              console.error('[MC] Попытка формирования элемента закончилась неудачно, возможно пытаетесь отдать под контроль элемент, который уже чем-то контролируется.')
-          }
+            let global_st = service.states ? service.states : [];
+            let local_st = locally_states ? locally_states : [];
+            try {
+                node[0].setAttribute("mc", service.context.id);
+            } catch (error) {
+                console.error('[MC] Попытка формирования элемента закончилась неудачно, возможно пытаетесь отдать под контроль элемент, который уже чем-то контролируется.')
+            }
 
-          NativeVirtual.controller = { global: global_st, local: local_st };
-          NativeVirtual.HTMLElement = node[0];
-          return node[0];
-      } else {
-          const mc_component = new component(service.props, service.context);
+            NativeVirtual.controller = { global: global_st, local: local_st };
+            NativeVirtual.HTMLElement = node[0];
+            return node[0];
+        } else {
+            const mc_component = new component(service.props, service.context);
 
-          const locally_states = [];
+            const locally_states = [];
 
-          MC.mc_state_global.forEach(item => {
-              if(item.local && item.local === mc_component) {
-                  locally_states.push(item);
-              }
-          });
-  
-          const id = MC.uuidv4();
-          const [ virtual, NativeVirtual ] = MC.createAnonimComponent(mc_component, id, key);
+            MC.mc_state_global.forEach(item => {
+                if(item.local && item.local === mc_component) {
+                    locally_states.push(item);
+                }
+            });
+    
+            const id = MC.uuidv4();
+            const [ virtual, NativeVirtual ] = MC.createAnonimComponent(mc_component, id, key);
 
-          const global_state = [];
-          service.states && service.states.map((state) => {
-              if(state.__proto__.constructor.name === "MCState") {
-                  state.virtualCollection.add(virtual);
-                  global_state.push(state.value);
-              } else {
-                  console.error('[MC] Ошибка обработки объекта контролёра.');
-              }
-          });
+            const global_state = [];
+            service.states && service.states.map((state) => {
+                if(state.__proto__.constructor.name === "MCState") {
+                    state.virtualCollection.add(virtual);
+                    global_state.push(state.value);
+                } else {
+                    console.error('[MC] Ошибка обработки объекта контролёра.');
+                }
+            });
 
-          const local_state = [];
+            const local_state = [];
 
-          locally_states && locally_states.map((state) => {
-              if(state.__proto__.constructor.name === "MCState") {
-                  state.virtualCollection.add(virtual);
-                  local_state.push(state.value);
-              } else {
-                  console.error('[MC] Ошибка обработки объекта контролёра.');
-              }
-          });
+            locally_states && locally_states.map((state) => {
+                if(state.__proto__.constructor.name === "MCState") {
+                    state.virtualCollection.add(virtual);
+                    local_state.push(state.value);
+                } else {
+                    console.error('[MC] Ошибка обработки объекта контролёра.');
+                }
+            });
 
-          NativeVirtual.props = service.props;
+            NativeVirtual.props = service.props;
 
-          const node = mc_component.render({ global: global_state, local: local_state }, service.props, service.props);
-  
-          if(!node) {
-              const micro_component = document.createElement('micro_component');
+            const node = mc_component.render({ global: global_state, local: local_state }, service.props, service.props);
+    
+            if(!node) {
+                const micro_component = MC_Component.createEmptyElement();
+                NativeVirtual.controller = { global: service.states, local: locally_states };
+                NativeVirtual.HTMLElement = micro_component;
+                return micro_component;
+            }
 
-              try {
-                  micro_component.setAttribute("style", "height: 0; width: 0; display: none;");
-                  micro_component.setAttribute("mc", 'anon');  
-              } catch (error) {
-                  console.error('[MC] Попытка формирования элемента закончилась неудачно, возможно пытаетесь отдать под контроль элемент, который уже чем-то контролируется.')
-              }
-              NativeVirtual.controller = { global: service.states, local: locally_states };
-              NativeVirtual.HTMLElement = micro_component;
-              return micro_component;
-          }
-
-          let global_st = service.states ? service.states : [];
-          let local_st = locally_states ? locally_states : [];
-  
-          try {
-              node[0].setAttribute("mc", 'anon');  
-          } catch (error) {
-              console.error('[MC] Попытка формирования элемента закончилась неудачно, возможно пытаетесь отдать под контроль элемент, который уже чем-то контролируется.')
-          }
-          NativeVirtual.controller = { global: global_st, local: local_st };
-          NativeVirtual.HTMLElement = node[0];
-          return node[0];
-      }
-  }
+            let global_st = service.states ? service.states : [];
+            let local_st = locally_states ? locally_states : [];
+    
+            try {
+                node[0].setAttribute("mc", 'anon');  
+            } catch (error) {
+                console.error('[MC] Попытка формирования элемента закончилась неудачно, возможно пытаетесь отдать под контроль элемент, который уже чем-то контролируется.')
+            }
+            NativeVirtual.controller = { global: global_st, local: local_st };
+            NativeVirtual.HTMLElement = node[0];
+            return node[0];
+        }
+    }
 };
 
 class MC {
@@ -564,29 +578,24 @@ class MC {
   static init() {
       (function() {
           var original$ = window.$;
-      
-          console.log('window.$');
-          console.log(window.$);
           window.$ = function() {
-              // компонент класса
               if(arguments[0].prototype instanceof MC) {
-      
-                  if(MCEngine.active) {
+                    if(MCEngine.active) {
                       const result = MCEngine.renderChilds_Component(...arguments);
-                      if(result !== 'nt%Rnd#el') {
-                          return result;
-                      }
-                  };
+                        if(result !== 'nt%Rnd#el') {
+                            return result;
+                        }
+                    };
       
-                  if(typeof arguments[1] === 'string') {
-                      if(MC.keys.some(el_key => el_key === arguments[1])) {
-                          console.error(`[MC] Обнаружено повторение ключа "${arguments[1]}" для компонента ${arguments[0].name}`);
-                      }
-                  } else {
-                      if(MC.keys.some(el_key => el_key === arguments[2])) {
-                          console.error(`[MC] Обнаружено повторение ключа "${arguments[2]}" для компонента ${arguments[0].name}`);
-                      }
-                  };
+                    if(typeof arguments[1] === 'string') {
+                            if(MC.keys.some(el_key => el_key === arguments[1])) {
+                                console.error(`[MC] Обнаружено повторение ключа "${arguments[1]}" для компонента ${arguments[0].name}`);
+                            }
+                    } else {
+                            if(MC.keys.some(el_key => el_key === arguments[2])) {
+                                console.error(`[MC] Обнаружено повторение ключа "${arguments[2]}" для компонента ${arguments[0].name}`);
+                            }
+                    };
       
                   return new MC_Component(new MC_Component_Registration(arguments));
               };

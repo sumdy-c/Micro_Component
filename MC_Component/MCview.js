@@ -291,6 +291,15 @@ class MC_Component {
         return this.getComponent(html);
     }
 
+    static createEmptyElement() {
+        const micro_component = document.createElement('micro_component');
+    
+        micro_component.setAttribute("style", "height: 0; width: 0; display: none;");
+        micro_component.setAttribute("mc", true);
+
+        return micro_component;
+    }
+
     getComponent(HTML) {
         return HTML;
     }
@@ -367,13 +376,7 @@ class MC_Component_Registration {
             const node = mc_component.render({ global: global_state, local: local_state }, service.props, service.props);
             
             if(!node) {
-                const micro_component = document.createElement('micro_component');
-                try {
-                    micro_component.setAttribute("style", "height: 0; width: 0; display: none;");
-                    micro_component.setAttribute("mc", service.context.id);
-                } catch (error) {
-                    console.error('[MC] Попытка формирования элемента закончилась неудачно, возможно пытаетесь отдать под контроль элемент, который уже чем-то контролируется.')
-                }
+                const micro_component = MC_Component.createEmptyElement();
                 NativeVirtual.controller = { global: service.states, local: locally_states };
                 NativeVirtual.HTMLElement = micro_component;
                 return micro_component;
@@ -430,14 +433,7 @@ class MC_Component_Registration {
             const node = mc_component.render({ global: global_state, local: local_state }, service.props, service.props);
     
             if(!node) {
-                const micro_component = document.createElement('micro_component');
-
-                try {
-                    micro_component.setAttribute("style", "height: 0; width: 0; display: none;");
-                    micro_component.setAttribute("mc", 'anon');  
-                } catch (error) {
-                    console.error('[MC] Попытка формирования элемента закончилась неудачно, возможно пытаетесь отдать под контроль элемент, который уже чем-то контролируется.')
-                }
+                const micro_component = MC_Component.createEmptyElement();
                 NativeVirtual.controller = { global: service.states, local: locally_states };
                 NativeVirtual.HTMLElement = micro_component;
                 return micro_component;

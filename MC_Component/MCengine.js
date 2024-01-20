@@ -47,14 +47,24 @@ class MCEngine {
                             virtualEl.controller.local.forEach(controller => {
                                 local_values.push(controller.value);
                             });
-                            newNode = virtualEl.component.render({ global: global_values, local: local_values }, virtualEl.props)[0];
+                            newNode = virtualEl.component.render({ global: global_values, local: local_values }, virtualEl.props);
+                            if(!newNode) {
+                                newNode = MC_Component.createEmptyElement();
+                            } else {
+                                newNode = newNode[0];
+                            }
                         } else {
                             const values = [];
                             virtualEl.controller.forEach(controller => {
                                 values.push(controller.value);
                             });
 
-                            newNode = virtualEl.Fn(values)[0];
+                            newNode = virtualEl.Fn(values);
+                            if(!newNode) {
+                                newNode = MC_Component.createEmptyElement();
+                            } else {
+                                newNode = newNode[0];
+                            }
                         }
                         virtualEl.HTMLElement.replaceWith(newNode);
                         virtualEl.HTMLElement = newNode;
@@ -82,14 +92,26 @@ class MCEngine {
                                     local_values.push(controller.value);
                                 });
 
-                                newNode = virtualEl.component.render({ global: global_values, local: local_values }, virtualEl.props)[0];
+                                newNode = virtualEl.component.render({ global: global_values, local: local_values }, virtualEl.props);
+
+                                if(!newNode) {
+                                    newNode = MC_Component.createEmptyElement();
+                                } else {
+                                    newNode = newNode[0];
+                                }
                             } else {
                                 const values = [];
                                 virtualEl.controller.forEach(controller => {
                                     values.push(controller.value);
                                 });
 
-                                newNode = virtualEl.Fn(values)[0];
+                                newNode = virtualEl.Fn(values);
+
+                                if(!newNode) {
+                                    newNode = MC_Component.createEmptyElement();
+                                } else {
+                                    newNode = newNode[0];
+                                }
                             }
                             
                             virtualEl.HTMLElement.replaceWith(newNode);
@@ -120,12 +142,11 @@ class MCEngine {
         
                         let newNode = virtual.Fn(values);
                         if(!newNode) {
-                            newNode = [];
-                            newNode[0] = document.createElement('micro_component');
-                            newNode[0].setAttribute("style", "height: 0; width: 0; display: none;");
-                            newNode[0].setAttribute("mc", 'anon');
+                            newNode = MC_Component.createEmptyElement();
+                        } else {
+                            newNode = newNode[0]
                         }
-                        virtual.HTMLElement = newNode[0];
+                        virtual.HTMLElement = newNode;
                         node = virtual.HTMLElement;
                     }
                 }
@@ -147,12 +168,11 @@ class MCEngine {
     
                     let newNode = virtual.Fn(values);
                     if(!newNode) {
-                        newNode = [];
-                        newNode[0] = document.createElement('micro_component');
-                        newNode[0].setAttribute("style", "height: 0; width: 0; display: none;");
-                        newNode[0].setAttribute("mc", context.id);
+                        newNode = MC_Component.createEmptyElement();
+                    } else {
+                        newNode = newNode[0]
                     }
-                    virtual.HTMLElement = newNode[0];
+                    virtual.HTMLElement = newNode;
                     node = virtual.HTMLElement;
                 }
             }
@@ -197,12 +217,11 @@ class MCEngine {
                         let newNode = virtual.component.render({ global: global_values, local: local_values }, service.props, virtual.props);
     
                         if(!newNode) {
-                            newNode = [];
-                            newNode[0] = document.createElement('micro_component');
-                            newNode[0].setAttribute("style", "height: 0; width: 0; display: none;");
-                            newNode[0].setAttribute("mc", 'anon');
+                            newNode = MC_Component.createEmptyElement();
+                        } else {
+                            newNode = newNode[0];
                         }
-                        virtual.HTMLElement = newNode[0];
+                        virtual.HTMLElement = newNode;
                         node = virtual.HTMLElement;
                     }
                 }
@@ -233,12 +252,11 @@ class MCEngine {
     
                     let newNode = virtual.component.render({ global: global_values, local: local_values }, service.props, virtual.props);
                     if(!newNode) {
-                        newNode = [];
-                        newNode[0] = document.createElement('micro_component');
-                        newNode[0].setAttribute("style", "height: 0; width: 0; display: none;");
-                        newNode[0].setAttribute("mc", context.id);
+                        newNode = MC_Component.createEmptyElement();
+                    } else {
+                        newNode = newNode[0];
                     }
-                    virtual.HTMLElement = newNode[0];
+                    virtual.HTMLElement = newNode;
                     node = virtual.HTMLElement;
                 }
             }
