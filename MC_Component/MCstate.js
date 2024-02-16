@@ -1,58 +1,57 @@
 class MCState {
-    /**
-     * id состояния
-     */
-    id;
+	/**
+	 * id состояния
+	 */
+	id;
 
-    /**
-     * Значение состояния
-     */
-    value;
+	/**
+	 * Значение состояния
+	 */
+	value;
 
-    /**
-     * Ключ доступа к состоянию
-     */
-    key;
+	/**
+	 * Ключ доступа к состоянию
+	 */
+	key;
 
-    /**
-     * Коллекция закреплённых элементов 
-     */
-    virtualCollection;
-    
-    /**
-     * Разрешение на изменение
-     */
-    passport;
+	/**
+	 * Коллекция закреплённых элементов
+	 */
+	virtualCollection;
 
-    /**
-     * 
-     * @param {} stateParam 
-     */
-    constructor(stateParam, local) {
-        if(local) {
-            this.local = local;    
-        }
-        
-        const { value, key, id } = stateParam;
-        this.value = value;
-        this.key = key;
-        this.id = id;
-        this.virtualCollection = new Set();
-    }
+	/**
+	 * Разрешение на изменение
+	 */
+	passport;
 
-    getPassport(passport) {
-        this.passport = passport;
-    }
+	/**
+	 *
+	 * @param {} stateParam
+	 */
+	constructor(stateParam, local) {
+		if (local) {
+			this.local = local;
+		}
 
-    set(value) {
-        if(this.passport) {
-            this.value = value;
-            this.passport.value = this.value;
-        }
-    }
+		const { value, key, id } = stateParam;
+		this.value = value;
+		this.key = key;
+		this.id = id;
+		this.virtualCollection = new Set();
+	}
 
-    get() {
-        return this.value;
-    }
+	getPassport(passport) {
+		this.passport = passport;
+	}
 
-};
+	set(value) {
+		if (this.passport) {
+			this.value = value;
+			this.passport.value = this.value;
+		}
+	}
+
+	get() {
+		return this.value;
+	}
+}
