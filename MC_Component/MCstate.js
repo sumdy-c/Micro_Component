@@ -52,6 +52,6 @@ class MCState {
 	}
 
 	get() {
-		return this.value;
+		return JSON.parse(JSON.stringify(this.value));
 	}
 }

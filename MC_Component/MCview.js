@@ -21,12 +21,37 @@ class MC {
 					}
 				}
 
+				if(MC.keys.includes(arguments[2])) {
+					let node;
+					const [ _, settingsComponent ] = arguments[1];
+					if(!settingsComponent.context) {
+						MC.anonimCollection.forEach(virtual => {
+							if(virtual.identifier === arguments[2]) {
+								const result = MCEngine.renderChilds_Component(...arguments);
+								if (result !== 'nt%Rnd#el') {
+									node = result;
+								}
+							}
+						});
+					} else {
+						settingsComponent.context.virtualCollection.forEach(virtual => {
+							if(virtual.identifier === arguments[2]) {
+								const result = MCEngine.renderChilds_Component(...arguments);
+								if (result !== 'nt%Rnd#el') {
+									node = result;
+								}
+							}
+						});
+					}
+					return node;
+				}
+
 				return new MC_Component(new MC_Component_Registration(arguments));
 			}
 
 			const [arg1, arg2, arg3] = arguments;
 			if (typeof arg1 === 'function') {
-				if (MCEngine.active) {
+				if(MCEngine.active) {
 					const result = MCEngine.renderChilds_FC(arg3, arg1);
 					if (result !== 'nt%Rnd#el') {
 						return result;
@@ -34,6 +59,8 @@ class MC {
 				}
 
 				if (arg3) {
+					console.error('MC | ОБРАТИТЕ ВНИМАНИЕ!');
+					console.warn('MC | Использование контекста в функциональных контейнерах - устарело! Все функциональные контейнеры перенесены в отдельную область видимости. Удалите контексти и получите доступ с помощью: MC.functionCollecton');
 					const id = MC.uuidv4();
 					const [virtual, NativeVirtual] = arg3.createVirtual_FC(arg1, id);
 					const values = [];
@@ -68,6 +95,20 @@ class MC {
 						return node;
 					}
 				} else {
+					let reNode = undefined;
+					MC.functionCollecton.forEach(virtual => {
+						if(virtual.Fn && virtual.Fn.toString() === arg1.toString()) {
+							const result = MCEngine.renderChilds_FC(arg3, arg1);
+							if (result !== 'nt%Rnd#el') {
+								reNode = result;
+							}
+						}
+					});
+
+					if(reNode) {
+						return reNode;
+					}
+					
 					const creatorAnon = arg1;
 					const dependencyAnon = arg2;
 
@@ -116,6 +157,8 @@ class MC {
 
 	static anonimCollection = new Set();
 
+	static functionCollecton = new Set();
+
 	static createAnonim_FC(virtualFn, id) {
 		const virtualElement = {
 			Fn: virtualFn,
@@ -123,7 +166,7 @@ class MC {
 			key: id,
 		};
 
-		MC.anonimCollection.add(virtualElement);
+		MC.functionCollecton.add(virtualElement);
 
 		return [{ context: null, id_element: id }, virtualElement];
 	}
@@ -195,6 +238,31 @@ class MC {
 		MC.mc_state_global.add(state);
 
 		return state;
+	}
+
+	/**
+	 * Создаёт уникальное состояние
+	 * @param {*} value значение состояния
+	 * @param {*} key Ключ для поиска состояния
+	 * @param {*} notUpdate Если true, не будет переопределять значение при входе
+	 * @returns 
+	 */
+	static uState(value, key, notUpdate) {
+		if(!key) {
+			console.error('[MC] При создании уникального состояния необходимо указывать ключ!');
+		}
+
+		const [ state ] = MC.getState(key);
+
+		if(state) {
+			if(notUpdate) {
+				return state;	
+			}
+			state.set(value);
+			return state;
+		}
+
+		return MC.createState(value, key);
 	}
 
 	static createLocallyState(value, key, component) {
@@ -355,7 +423,10 @@ class MC_Component_Registration {
 
 			if (!node) {
 				const micro_component = MC_Component.createEmptyElement();
-				NativeVirtual.controller = { global: service.states, local: locally_states };
+				NativeVirtual.controller = {
+					global: service.states,
+					local: locally_states,
+				};
 				NativeVirtual.HTMLElement = micro_component;
 				return micro_component;
 			}
@@ -421,7 +492,10 @@ class MC_Component_Registration {
 
 			if (!node) {
 				const micro_component = MC_Component.createEmptyElement();
-				NativeVirtual.controller = { global: service.states, local: locally_states };
+				NativeVirtual.controller = {
+					global: service.states,
+					local: locally_states,
+				};
 				NativeVirtual.HTMLElement = micro_component;
 				return micro_component;
 			}

@@ -1,6 +1,7 @@
 class MCEngine {
 	state;
 	static active = false;
+
 	constructor() {}
 
 	handlerRender(target, fn, path) {
@@ -34,44 +35,60 @@ class MCEngine {
 		state.virtualCollection.forEach((virtualData) => {
 			if (!virtualData.context) {
 				MC.anonimCollection.forEach((virtualEl) => {
+					if (!virtualEl.component) {
+						return;
+					}
 					if (virtualEl.key === virtualData.id_element) {
 						let newNode;
-						if (virtualEl.component) {
-							const global_values = [];
-							virtualEl.controller.global.forEach((controller) => {
-								global_values.push(controller.value);
-							});
+						const global_values = [];
+						virtualEl.controller.global.forEach((controller) => {
+							global_values.push(controller.value);
+						});
 
-							const local_values = [];
-							virtualEl.controller.local.forEach((controller) => {
-								local_values.push(controller.value);
-							});
-							newNode = virtualEl.component.render(
-								{ global: global_values, local: local_values },
-								virtualEl.props
-							);
-							if (!newNode) {
-								newNode = MC_Component.createEmptyElement();
-							} else {
-								newNode = newNode[0];
-							}
+						const local_values = [];
+						virtualEl.controller.local.forEach((controller) => {
+							local_values.push(controller.value);
+						});
+						newNode = virtualEl.component.render(
+							{ global: global_values, local: local_values },
+							virtualEl.props
+						);
+						if (!newNode) {
+							newNode = MC_Component.createEmptyElement();
 						} else {
-							const values = [];
-							virtualEl.controller.forEach((controller) => {
-								values.push(controller.value);
-							});
-
-							newNode = virtualEl.Fn(values);
-							if (!newNode) {
-								newNode = MC_Component.createEmptyElement();
-							} else if (newNode.length) {
-								newNode = newNode[0];
-							}
+							newNode = newNode[0];
 						}
+
 						virtualEl.HTMLElement.replaceWith(newNode);
 						virtualEl.HTMLElement = newNode;
 					}
 				});
+
+				MC.functionCollecton.forEach((virtualEl) => {
+					if (!virtualEl.Fn) {
+						return;
+					}
+
+					if (virtualEl.key === virtualData.id_element) {
+						let newNode;
+						
+						const values = [];
+						virtualEl.controller.forEach((controller) => {
+							values.push(controller.value);
+						});
+
+						newNode = virtualEl.Fn(values);
+						if (!newNode) {
+							newNode = MC_Component.createEmptyElement();
+						} else if (newNode.length) {
+							newNode = newNode[0];
+						}
+						
+						virtualEl.HTMLElement.replaceWith(newNode);
+						virtualEl.HTMLElement = newNode;
+					}
+				});
+
 
 				MCEngine.active = false;
 				return;
@@ -135,7 +152,7 @@ class MCEngine {
 		let finder = false;
 
 		if (!context) {
-			MC.anonimCollection.forEach((virtual) => {
+			MC.functionCollecton.forEach((virtual) => {
 				if (!virtual.component) {
 					if (virtual.Fn.toString() === creator.toString()) {
 						finder = true;
@@ -194,10 +211,10 @@ class MCEngine {
 			);
 			return 'nt%Rnd#el';
 		}
+
 		if (typeof props === 'string') {
 			key = props;
 		}
-
 		const [prop, service] = props;
 
 		let node = null;
@@ -222,9 +239,10 @@ class MCEngine {
 
 						let newNode = virtual.component.render(
 							{ global: global_values, local: local_values },
-							service.props,
-							virtual.props
+							service.props
 						);
+
+						virtual.props = service.props;
 
 						if (!newNode) {
 							newNode = MC_Component.createEmptyElement();
@@ -261,9 +279,11 @@ class MCEngine {
 
 					let newNode = virtual.component.render(
 						{ global: global_values, local: local_values },
-						service.props,
-						virtual.props
+						service.props
 					);
+
+					virtual.props = service.props;
+
 					if (!newNode) {
 						newNode = MC_Component.createEmptyElement();
 					} else {
