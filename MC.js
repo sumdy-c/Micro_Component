@@ -269,12 +269,16 @@ class MCEngine {
 		if (!context) {
 			MC.functionCollecton.forEach((virtual) => {
 				if (!virtual.component) {
-					if (virtual.Fn.toString() === creator.toString()) {
+					if (virtual.Fn.toString() === creator.toString()) {		
 						finder = true;
 						const values = [];
-						virtual.controller.forEach((controller) => {
-							values.push(controller.value);
-						});
+						if(!virtual.controller || virtual.controller.length === 0) {
+							MC.mc_solo_render_global.add(virtual.Fn.toString());
+						} else {
+							virtual.controller.forEach((controller) => {
+								values.push(controller.value);
+							});
+						}
 
 						let newNode = virtual.Fn(values);
 						if (!newNode) {
@@ -623,8 +627,13 @@ class MC_Component_Registration {
 
 class MC {
 	static keys = [];
+
+	static anonimCollection = new Set();
+	static functionCollecton = new Set();
+
 	static mc_state_global = new Set();
 	static mc_context_global = new Set();
+	static mc_solo_render_global = new Set();
 
 	constructor() {
 		if (MC._instance) {
@@ -673,7 +682,19 @@ class MC {
 			}
 
 			const [arg1, arg2, arg3] = arguments;
+
 			if (typeof arg1 === 'function') {
+				let skipEffect = false;
+				MC.mc_solo_render_global.forEach(solo_effect => {
+					if(solo_effect === arg1.toString()){
+						skipEffect = true;
+					}
+				});
+
+				if(skipEffect) {
+					return;
+				}
+				
 				if(MCEngine.active) {
 					const result = MCEngine.renderChilds_FC(arg3, arg1);
 					if (result !== 'nt%Rnd#el') {
@@ -748,6 +769,10 @@ class MC {
 								console.warn('Не стейт');
 							}
 						});
+					
+					if(!dependencyAnon || !dependencyAnon.length) {
+						MC.mc_solo_render_global.add(creatorAnon.toString());
+					}
 
 					const node = creatorAnon(arg);
 
@@ -778,9 +803,6 @@ class MC {
 		};
 	}
 
-	static anonimCollection = new Set();
-
-	static functionCollecton = new Set();
 
 	static createAnonim_FC(virtualFn, id) {
 		const virtualElement = {
