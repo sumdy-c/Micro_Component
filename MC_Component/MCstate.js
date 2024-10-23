@@ -45,6 +45,10 @@ class MCState {
 	}
 
 	set(value) {
+		if(MC.MC_setting.controlled && JSON.stringify(value) === JSON.stringify(this.value)) {
+			return;
+		}
+
 		if (this.passport) {
 			this.value = value;
 			this.passport.value = this.value;

@@ -102,6 +102,10 @@ class MCState {
 	}
 
 	set(value) {
+		if(MC.MC_setting.controlled && JSON.stringify(value) === JSON.stringify(this.value)) {
+			return;
+		}
+
 		if (this.passport) {
 			this.value = value;
 			this.passport.value = this.value;
@@ -116,8 +120,6 @@ class MCState {
 class MCEngine {
 	state;
 	static active = false;
-
-	constructor() {}
 
 	handlerRender(target, fn, path) {
 		let tree = {};
@@ -192,7 +194,20 @@ class MCEngine {
 							values.push(controller.value);
 						});
 
-						newNode = virtualEl.Fn(values);
+						let render_process = {
+							onDemand: false,
+						}
+
+						const render_process_reflection = function(arg_fn) {
+							arg_fn(render_process);
+						}
+
+						newNode = virtualEl.Fn(values, render_process_reflection);
+
+						if(render_process.onDemand) {
+							MC.mc_solo_render_global.add(virtualEl.Fn.toString());	
+						}
+
 						if (!newNode) {
 							newNode = MC_Component.createEmptyElement();
 						} else if (newNode.length) {
@@ -280,7 +295,20 @@ class MCEngine {
 							});
 						}
 
-						let newNode = virtual.Fn(values);
+						let render_process = {
+							onDemand: false,
+						}
+
+						const render_process_reflection = function(arg_fn) {
+							arg_fn(render_process);
+						}
+
+						let newNode = virtual.Fn(values, render_process_reflection);
+						
+						if(render_process.onDemand) {
+							MC.mc_solo_render_global.add(virtual.Fn.toString());	
+						}
+
 						if (!newNode) {
 							newNode = MC_Component.createEmptyElement();
 						} else {
@@ -625,6 +653,10 @@ class MC_Component_Registration {
 	}
 }
 
+/**
+ * Предоставляет основной инструмент для манипулирования API Micro Component
+ * @returns <micro_component lib 2024>
+ */
 class MC {
 	static keys = [];
 
@@ -634,16 +666,33 @@ class MC {
 	static mc_state_global = new Set();
 	static mc_context_global = new Set();
 	static mc_solo_render_global = new Set();
+	static mc_demand_render_global = new Set();
+
+	static MC_setting = {
+		controlled: false,
+	}
 
 	constructor() {
 		if (MC._instance) {
 			return MC._instance;
 		}
 	}
-
-	static init() {
+	/**
+	 * Инициализировать Micro Component
+	 * @param MC_setting:
+	 * controlled: Позволяет лучше контролировать поток рендеринга, путём запрета отрисовки косвенных компонентов
+	 * 
+	 * @returns <init API welcome message>
+	 */
+	static init(MC_setting) {
 		var original$ = window.$;
 
+		MC.MC_setting.controlled = MC_setting ? MC_setting.controlled : false;
+
+		/**
+		 * Предоставляет основной инструмент для манипулирования API Micro Component
+		 * @returns <micro_component lib 2024>
+		 */
 		window.$.MC = function () {
 			if (arguments[0].prototype instanceof MC) {
 				if (MCEngine.active) {
@@ -651,9 +700,21 @@ class MC {
 					if (result !== 'nt%Rnd#el') {
 						return result;
 					}
-				}
+				}	
 
-				if(MC.keys.includes(arguments[2])) {
+				const enter_key = (arg) => {
+					if(typeof arg[2] === 'string') {
+						return arg[2]
+					}
+
+					if(typeof arg[1] === 'string') {
+						return arg[1];
+					}
+
+					return undefined;
+				} 
+
+				if(enter_key(arguments) && MC.keys.includes(enter_key(arguments))) {
 					let node;
 					const [ _, settingsComponent ] = arguments[1];
 					if(!settingsComponent.context) {
@@ -686,7 +747,7 @@ class MC {
 			if (typeof arg1 === 'function') {
 				let skipEffect = false;
 				MC.mc_solo_render_global.forEach(solo_effect => {
-					if(solo_effect === arg1.toString()){
+					if(solo_effect === arg1.toString()) {
 						skipEffect = true;
 					}
 				});
@@ -704,7 +765,7 @@ class MC {
 
 				if (arg3) {
 					console.error('MC | ОБРАТИТЕ ВНИМАНИЕ!');
-					console.warn('MC | Использование контекста в функциональных контейнерах - устарело! Все функциональные контейнеры перенесены в отдельную область видимости. Удалите контексти и получите доступ с помощью: MC.functionCollecton');
+					console.warn('MC | Использование контекста в функциональных контейнерах - устарело! Все функциональные контейнеры перенесены в отдельную область видимости. Удалите контекст и получите доступ с помощью: MC.functionCollecton');
 					const id = MC.uuidv4();
 					const [virtual, NativeVirtual] = arg3.createVirtual_FC(arg1, id);
 					const values = [];
@@ -774,7 +835,19 @@ class MC {
 						MC.mc_solo_render_global.add(creatorAnon.toString());
 					}
 
-					const node = creatorAnon(arg);
+					let render_process = {
+						onDemand: false,
+					}
+
+					const render_process_reflection = function(arg_fn) {
+						arg_fn(render_process);
+					}
+
+					const node = creatorAnon(arg, render_process_reflection);
+
+					if(render_process.onDemand) {
+						MC.mc_solo_render_global.add(creatorAnon.toString());	
+					}
 
 					if (!node) {
 						const micro_component = MC_Component.createEmptyElement();
@@ -801,6 +874,8 @@ class MC {
 
 			return resultCall;
 		};
+
+		return 'Добро пожаловать в MC.js!';
 	}
 
 
@@ -833,6 +908,13 @@ class MC {
 		return MC.createLocallyState(value, key, this);
 	}
 
+	/**
+	 * Позволяет предоставить реквизит компоненту
+	 * @argument { object: states, props, context }
+	 * @param states: MCstate[] - предоствлять глобальное состояние
+	 * @param props: <any_entity> - предоствлять как обновляемый реквизит
+	 * @param context: MCcontext - заколючить компонент в выделенную область видимости
+	 */
 	static Props(props_object) {
 		const props = [];
 
@@ -859,7 +941,6 @@ class MC {
 			serviceObject.props = props_object[prop];
 		}
 
-		// Если в компоненте нет элементов на его место будет отдан undefined; Отметить в документации
 		return [props, serviceObject];
 	}
 
@@ -869,6 +950,12 @@ class MC {
 		);
 	}
 
+	/**
+	 * Создаёт обычное состояние
+	 * @param {*} value значение состояния
+	 * @param {*} key Ключ для поиска состояния
+	 * @returns 
+	 */
 	static createState(value, key) {
 		const stateParam = {
 			value: value,

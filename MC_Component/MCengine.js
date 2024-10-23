@@ -2,8 +2,6 @@ class MCEngine {
 	state;
 	static active = false;
 
-	constructor() {}
-
 	handlerRender(target, fn, path) {
 		let tree = {};
 		if (!path) {
@@ -77,7 +75,20 @@ class MCEngine {
 							values.push(controller.value);
 						});
 
-						newNode = virtualEl.Fn(values);
+						let render_process = {
+							onDemand: false,
+						}
+
+						const render_process_reflection = function(arg_fn) {
+							arg_fn(render_process);
+						}
+
+						newNode = virtualEl.Fn(values, render_process_reflection);
+
+						if(render_process.onDemand) {
+							MC.mc_solo_render_global.add(virtualEl.Fn.toString());	
+						}
+
 						if (!newNode) {
 							newNode = MC_Component.createEmptyElement();
 						} else if (newNode.length) {
@@ -154,14 +165,31 @@ class MCEngine {
 		if (!context) {
 			MC.functionCollecton.forEach((virtual) => {
 				if (!virtual.component) {
-					if (virtual.Fn.toString() === creator.toString()) {
+					if (virtual.Fn.toString() === creator.toString()) {		
 						finder = true;
 						const values = [];
-						virtual.controller.forEach((controller) => {
-							values.push(controller.value);
-						});
+						if(!virtual.controller || virtual.controller.length === 0) {
+							MC.mc_solo_render_global.add(virtual.Fn.toString());
+						} else {
+							virtual.controller.forEach((controller) => {
+								values.push(controller.value);
+							});
+						}
 
-						let newNode = virtual.Fn(values);
+						let render_process = {
+							onDemand: false,
+						}
+
+						const render_process_reflection = function(arg_fn) {
+							arg_fn(render_process);
+						}
+
+						let newNode = virtual.Fn(values, render_process_reflection);
+						
+						if(render_process.onDemand) {
+							MC.mc_solo_render_global.add(virtual.Fn.toString());	
+						}
+
 						if (!newNode) {
 							newNode = MC_Component.createEmptyElement();
 						} else {
