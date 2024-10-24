@@ -148,9 +148,11 @@ class MCEngine {
 		if (state.virtualCollection.length === 0) {
 			return null;
 		}
-		MCEngine.active = true;
+		
 		state.virtualCollection.forEach((virtualData) => {
+			MCEngine.active = true;
 			if (!virtualData.context) {
+				
 				MC.anonimCollection.forEach((virtualEl) => {
 					if (!virtualEl.component) {
 						return;
@@ -180,7 +182,6 @@ class MCEngine {
 							virtualEl.props,
 							render_process_reflection
 						);
-
 						if(render_process_component.onDemand) {
 							return;
 						}
