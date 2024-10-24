@@ -166,10 +166,25 @@ class MCEngine {
 						virtualEl.controller.local.forEach((controller) => {
 							local_values.push(controller.value);
 						});
+
+						const render_process_component = {
+							onDemand: false,
+						}
+			
+						const render_process_reflection = function(arg_fn) {
+							arg_fn(render_process_component);
+						}
+
 						newNode = virtualEl.component.render(
 							{ global: global_values, local: local_values },
-							virtualEl.props
+							virtualEl.props,
+							render_process_reflection
 						);
+
+						if(render_process_component.onDemand) {
+							return;
+						}
+
 						if (!newNode) {
 							newNode = MC_Component.createEmptyElement();
 						} else {
@@ -240,10 +255,23 @@ class MCEngine {
 									local_values.push(controller.value);
 								});
 
+								const render_process_component = {
+									onDemand: false,
+								}
+					
+								const render_process_reflection = function(arg_fn) {
+									arg_fn(render_process_component);
+								}
+
 								newNode = virtualEl.component.render(
 									{ global: global_values, local: local_values },
-									virtualEl.props
+									virtualEl.props,
+									render_process_reflection
 								);
+
+								if(render_process_component.onDemand) {
+									return;
+								}
 
 								if (!newNode) {
 									newNode = MC_Component.createEmptyElement();
@@ -384,10 +412,23 @@ class MCEngine {
 							local_values.push(controller.value);
 						});
 
+						const render_process_component = {
+							onDemand: false,
+						}
+			
+						const render_process_reflection = function(arg_fn) {
+							arg_fn(render_process_component);
+						}
+
 						let newNode = virtual.component.render(
 							{ global: global_values, local: local_values },
-							service.props
+							service.props,
+							render_process_reflection
 						);
+
+						if(render_process_component.onDemand) {
+							return;
+						}
 
 						virtual.props = service.props;
 
@@ -424,10 +465,23 @@ class MCEngine {
 						local_values.push(controller.value);
 					});
 
+					const render_process_component = {
+						onDemand: false,
+					}
+		
+					const render_process_reflection = function(arg_fn) {
+						arg_fn(render_process_component);
+					}
+
 					let newNode = virtual.component.render(
 						{ global: global_values, local: local_values },
-						service.props
+						service.props,
+						render_process_reflection
 					);
+
+					if(render_process_component.onDemand) {
+						return;
+					}
 
 					virtual.props = service.props;
 
@@ -509,9 +563,8 @@ class MC_Component_Registration {
 
 	register(component, componentArgs, key) {
 		const [props, service] = componentArgs;
-
 		if (service.context) {
-			const mc_component = new component(service.props, service.context);
+			const mc_component = new component(service.props, service.context, key);
 
 			const locally_states = [];
 
@@ -549,12 +602,22 @@ class MC_Component_Registration {
 				});
 
 			NativeVirtual.props = service.props;
+				
+			const render_process_component = {
+				onDemand: false,
+			}
+
+			const render_process_reflection = function(arg_fn) {
+				arg_fn(render_process_component);
+			}
 
 			const node = mc_component.render(
 				{ global: global_state, local: local_state },
 				service.props,
-				service.props
+				render_process_reflection
 			);
+
+			// тут есть render_process_reflection, но при первом вхождении всегда предусмотрен рендер
 
 			if (!node) {
 				const micro_component = MC_Component.createEmptyElement();
@@ -619,11 +682,21 @@ class MC_Component_Registration {
 
 			NativeVirtual.props = service.props;
 
+			let render_process_component = {
+				onDemand: false,
+			}
+
+			const render_process_reflection = function(arg_fn) {
+				arg_fn(render_process_component);
+			}
+
 			const node = mc_component.render(
 				{ global: global_state, local: local_state },
 				service.props,
-				service.props
+				render_process_reflection
 			);
+
+			// тут есть render_process_reflection, но при первом вхождении всегда предусмотрен рендер
 
 			if (!node) {
 				const micro_component = MC_Component.createEmptyElement();
