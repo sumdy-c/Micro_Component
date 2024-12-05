@@ -401,6 +401,13 @@ class MCEngine {
 				if (!virtual.Fn) {
 					if (virtual.identifier === key) {
 						finder = true;
+						
+						const [_pArr, pObj ] = props;
+
+						if (pObj.controlled) {
+							node = virtual.HTMLElement;
+							return;
+						}
 
 						const global_values = [];
 
@@ -454,6 +461,13 @@ class MCEngine {
 				if (virtual.identifier === key) {
 					finder = true;
 
+					const [_pArr, pObj ] = props;
+
+					if (pObj.controlled) {
+						node = virtual.HTMLElement;
+						return;
+					}	
+
 					const global_values = [];
 
 					virtual.controller.global.forEach((controller) => {
@@ -467,7 +481,7 @@ class MCEngine {
 					});
 
 					const render_process_component = {
-						onDemand: false,
+						onDemand: false
 					}
 		
 					const render_process_reflection = function(arg_fn) {
@@ -645,7 +659,7 @@ class MC_Component_Registration {
 				return node;
 			}
 		} else {
-			const mc_component = new component(service.props, service.context);
+			const mc_component = new component(service.props, service.context, key);
 
 			const locally_states = [];
 
@@ -761,7 +775,7 @@ class MC {
 	static init(MC_setting) {
 		var original$ = window.$;
 
-		MC.MC_setting.controlled = MC_setting ? MC_setting.controlled : false;
+		MC.MC_setting.controlled = MC_setting ? MC_setting.controlled : true;
 
 		/**
 		 * Предоставляет основной инструмент для манипулирования API Micro Component
@@ -994,6 +1008,7 @@ class MC {
 
 		const serviceObject = {
 			props: null,
+			controlled: false,
 			context: null,
 			states: [],
 		};
@@ -1009,6 +1024,10 @@ class MC {
 				props[1] = { states: props_object[prop] };
 				serviceObject.states = props_object[prop];
 				continue;
+			}
+
+			if(prop === 'controlled') {
+				serviceObject.controlled = props_object[prop];
 			}
 
 			props[0] = { props: props_object[prop] };
@@ -1071,6 +1090,27 @@ class MC {
 		return MC.createState(value, key);
 	}
 
+	/**
+	 * Создаёт уникальный контекст
+	 * @param {*} value значение состояния
+	 * @param {*} key Ключ для поиска состояния
+	 * @param {*} notUpdate Если true, не будет переопределять значение при входе
+	 * @returns 
+	 */
+	static uContext(key) {
+		if(!key) {
+			console.error('[MC] При создании уникального контекста необходимо указывать ключ!');
+		}
+
+		const context = MC.getContext(key);
+
+		if(context) {
+			return context;
+		}
+
+		return MC.createContext(key);
+	}
+
 	static createLocallyState(value, key, component) {
 		const stateParam = {
 			value: value,
@@ -1122,10 +1162,10 @@ class MC {
 		return state;
 	}
 
-	static getContext() {
+	static getContext(key) {
 		let context;
 		MC.mc_context_global.forEach((item) => {
-			if (item.id === id) {
+			if (item.key === key) {
 				context = item;
 			}
 		});
