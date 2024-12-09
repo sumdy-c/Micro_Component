@@ -29,9 +29,11 @@ class MCEngine {
 		if (state.virtualCollection.length === 0) {
 			return null;
 		}
-		MCEngine.active = true;
+		
 		state.virtualCollection.forEach((virtualData) => {
+			MCEngine.active = true;
 			if (!virtualData.context) {
+				
 				MC.anonimCollection.forEach((virtualEl) => {
 					if (!virtualEl.component) {
 						return;
@@ -47,10 +49,24 @@ class MCEngine {
 						virtualEl.controller.local.forEach((controller) => {
 							local_values.push(controller.value);
 						});
+
+						const render_process_component = {
+							onDemand: false,
+						}
+			
+						const render_process_reflection = function(arg_fn) {
+							arg_fn(render_process_component);
+						}
+
 						newNode = virtualEl.component.render(
 							{ global: global_values, local: local_values },
-							virtualEl.props
+							virtualEl.props,
+							render_process_reflection
 						);
+						if(render_process_component.onDemand) {
+							return;
+						}
+
 						if (!newNode) {
 							newNode = MC_Component.createEmptyElement();
 						} else {
@@ -121,10 +137,23 @@ class MCEngine {
 									local_values.push(controller.value);
 								});
 
+								const render_process_component = {
+									onDemand: false,
+								}
+					
+								const render_process_reflection = function(arg_fn) {
+									arg_fn(render_process_component);
+								}
+
 								newNode = virtualEl.component.render(
 									{ global: global_values, local: local_values },
-									virtualEl.props
+									virtualEl.props,
+									render_process_reflection
 								);
+
+								if(render_process_component.onDemand) {
+									return;
+								}
 
 								if (!newNode) {
 									newNode = MC_Component.createEmptyElement();
@@ -253,6 +282,13 @@ class MCEngine {
 				if (!virtual.Fn) {
 					if (virtual.identifier === key) {
 						finder = true;
+						
+						const [_pArr, pObj ] = props;
+
+						if (pObj.controlled) {
+							node = virtual.HTMLElement;
+							return;
+						}
 
 						const global_values = [];
 
@@ -265,10 +301,23 @@ class MCEngine {
 							local_values.push(controller.value);
 						});
 
+						const render_process_component = {
+							onDemand: false,
+						}
+			
+						const render_process_reflection = function(arg_fn) {
+							arg_fn(render_process_component);
+						}
+
 						let newNode = virtual.component.render(
 							{ global: global_values, local: local_values },
-							service.props
+							service.props,
+							render_process_reflection
 						);
+
+						if(render_process_component.onDemand) {
+							return;
+						}
 
 						virtual.props = service.props;
 
@@ -293,6 +342,13 @@ class MCEngine {
 				if (virtual.identifier === key) {
 					finder = true;
 
+					const [_pArr, pObj ] = props;
+
+					if (pObj.controlled) {
+						node = virtual.HTMLElement;
+						return;
+					}	
+
 					const global_values = [];
 
 					virtual.controller.global.forEach((controller) => {
@@ -305,10 +361,23 @@ class MCEngine {
 						local_values.push(controller.value);
 					});
 
+					const render_process_component = {
+						onDemand: false
+					}
+		
+					const render_process_reflection = function(arg_fn) {
+						arg_fn(render_process_component);
+					}
+
 					let newNode = virtual.component.render(
 						{ global: global_values, local: local_values },
-						service.props
+						service.props,
+						render_process_reflection
 					);
+
+					if(render_process_component.onDemand) {
+						return;
+					}
 
 					virtual.props = service.props;
 
