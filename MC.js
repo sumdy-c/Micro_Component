@@ -748,6 +748,8 @@ class MC_Component_Registration {
 class MC {
 	static keys = [];
 
+	static version = '0.6.4';
+
 	static anonimCollection = new Set();
 	static functionCollecton = new Set();
 

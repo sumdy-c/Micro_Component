@@ -1,18 +1,22 @@
 class MC_Component {
+	globalEventsMap;
 	constructor(html) {
+		this.globalEventsMap = null;
 		return this.getComponent(html);
 	}
 
-	static createEmptyElement() {
+	static createEmptyElement(key, contextKey) {
 		const micro_component = document.createElement('micro_component');
 
 		micro_component.setAttribute('style', 'height: 0; width: 0; display: none;');
-		micro_component.setAttribute('mc', true);
+		micro_component.setAttribute('mc', key);
+		contextKey && micro_component.setAttribute('mc_context', contextKey);
 
 		return micro_component;
 	}
 
 	getComponent(HTML) {
+		MC.savedEvents(HTML);
 		return HTML;
 	}
 }
@@ -102,7 +106,7 @@ class MC_Component_Registration {
 			// тут есть render_process_reflection, но при первом вхождении всегда предусмотрен рендер
 
 			if (!node) {
-				const micro_component = MC_Component.createEmptyElement();
+				const micro_component = MC_Component.createEmptyElement(NativeVirtual.key, service.context.id);
 				NativeVirtual.controller = {
 					global: service.states,
 					local: locally_states,
@@ -115,13 +119,17 @@ class MC_Component_Registration {
 			let local_st = locally_states ? locally_states : [];
 
 			if (node.length) {
-				node[0].setAttribute('mc', true);
+				node[0].setAttribute('mc', NativeVirtual.key);
+				node[0].setAttribute('mc_context', service.context.id);
 				NativeVirtual.controller = { global: global_st, local: local_st };
+				MC.savedEvents(node[0]);
 				NativeVirtual.HTMLElement = node[0];
 				return node[0];
 			} else {
-				node.setAttribute('mc', true);
+				node.setAttribute('mc', NativeVirtual.key);
+				node.setAttribute('mc_context', service.context.id);
 				NativeVirtual.controller = { global: global_st, local: local_st };
+				MC.savedEvents(node);
 				NativeVirtual.HTMLElement = node;
 				return node;
 			}
@@ -181,7 +189,7 @@ class MC_Component_Registration {
 			// тут есть render_process_reflection, но при первом вхождении всегда предусмотрен рендер
 
 			if (!node) {
-				const micro_component = MC_Component.createEmptyElement();
+				const micro_component = MC_Component.createEmptyElement(NativeVirtual.key);
 				NativeVirtual.controller = {
 					global: service.states,
 					local: locally_states,
@@ -194,12 +202,12 @@ class MC_Component_Registration {
 			let local_st = locally_states ? locally_states : [];
 
 			if (node.length) {
-				node[0].setAttribute('mc', true);
+				node[0].setAttribute('mc', NativeVirtual.key);
 				NativeVirtual.controller = { global: global_st, local: local_st };
 				NativeVirtual.HTMLElement = node[0];
 				return node[0];
 			} else {
-				node.setAttribute('mc', true);
+				node.setAttribute('mc', NativeVirtual.key);
 				NativeVirtual.controller = { global: global_st, local: local_st };
 				NativeVirtual.HTMLElement = node;
 				return node;
@@ -208,16 +216,14 @@ class MC_Component_Registration {
 	}
 }
 
-/**
- * Предоставляет основной инструмент для манипулирования API Micro Component
- * @returns <micro_component lib 2024>
- */
 class MC {
 	static keys = [];
 
+	static version = '0.7.0';
+
 	static anonimCollection = new Set();
 	static functionCollecton = new Set();
-
+	static mc_events_global = new Map();
 	static mc_state_global = new Set();
 	static mc_context_global = new Set();
 	static mc_solo_render_global = new Set();
@@ -249,6 +255,7 @@ class MC {
 		 * @returns <micro_component lib 2024>
 		 */
 		window.$.MC = function () {
+
 			if (arguments[0].prototype instanceof MC) {
 				if (MCEngine.active) {
 					const result = MCEngine.renderChilds_Component(...arguments);
@@ -291,6 +298,7 @@ class MC {
 							}
 						});
 					}
+
 					return node;
 				}
 
@@ -319,6 +327,11 @@ class MC {
 				}
 
 				if (arg3) {
+					console.error('MC | Вход контекста для выпуска MC 7 заблокирован');
+					console.warn('MC | Вы можете безопасно создать функциональные контейнеры, без контекста, в области видимости MC.functionCollecton');
+					return;
+					// заблокировать вход для контекста в выпуске 7
+					//#region 
 					console.error('MC | ОБРАТИТЕ ВНИМАНИЕ!');
 					console.warn('MC | Использование контекста в функциональных контейнерах - устарело! Все функциональные контейнеры перенесены в отдельную область видимости. Удалите контекст и получите доступ с помощью: MC.functionCollecton');
 					const id = MC.uuidv4();
@@ -337,23 +350,24 @@ class MC {
 					const node = arg1(values);
 
 					if (!node) {
-						const micro_component = MC_Component.createEmptyElement();
+						const micro_component = MC_Component.createEmptyElement(NativeVirtual.key);
 						NativeVirtual.controller = arg2;
 						NativeVirtual.HTMLElement = micro_component;
 						return micro_component;
 					}
 
 					if (node.length) {
-						node[0].setAttribute('mc', true);
+						node[0].setAttribute('mc', NativeVirtual.key);
 						NativeVirtual.controller = arg2;
 						NativeVirtual.HTMLElement = node[0];
 						return node[0];
 					} else {
-						node.setAttribute('mc', true);
+						node.setAttribute('mc', NativeVirtual.key);
 						NativeVirtual.controller = { global: global_st, local: local_st };
 						NativeVirtual.HTMLElement = node;
 						return node;
 					}
+					//#endregion
 				} else {
 					let reNode = undefined;
 					MC.functionCollecton.forEach(virtual => {
@@ -405,21 +419,26 @@ class MC {
 					}
 
 					if (!node) {
-						const micro_component = MC_Component.createEmptyElement();
+						const micro_component = MC_Component.createEmptyElement(NativeVirtual.key);
 						NativeVirtual.controller = dependencyAnon;
 						NativeVirtual.HTMLElement = micro_component;
 						return micro_component;
 					}
 
+					/**
+					 * Посмотри запись event_id при формировании html, такое ощущение что не пишет в атрибуты событие в virtual
+ 					 */
 					if (node.length) {
-						node[0].setAttribute('mc', true);
+						node[0].setAttribute('mc', NativeVirtual.key);
 						NativeVirtual.controller = dependencyAnon;
 						NativeVirtual.HTMLElement = node[0];
+						MC.savedEvents(node[0]);
 						return node[0];
 					} else {
-						node.setAttribute('mc', true);
+						node.setAttribute('mc', NativeVirtual.key);
 						NativeVirtual.controller = dependencyAnon;
 						NativeVirtual.HTMLElement = node;
+						MC.savedEvents(node);
 						return node;
 					}
 				}
@@ -433,6 +452,44 @@ class MC {
 		return 'Добро пожаловать в MC.js!';
 	}
 
+	static savedEvents(html) {
+		function scanElement(element) {
+		  const events = $._data(element, "events");
+		  if (events) {
+			let mcId = $(element).attr("mc-event-id");
+			if (!mcId) {
+			  mcId = "mc-" + Math.random().toString(36).substr(2, 8);
+			  $(element).attr("mc-event-id", mcId);
+			}
+	
+			const clonedEvents = MCState.deepClone(events);
+	
+			if (!MC.mc_events_global.has(mcId)) {
+			  MC.mc_events_global.set(mcId, clonedEvents);
+			}
+	
+			$(element).off();
+		  }
+	
+		  $(element).children().each((_, child) => scanElement(child));
+		  return element;
+		}
+
+		scanElement(html);
+
+		MC.rebindEvents();
+	  }
+	
+	  static rebindEvents() {
+		MC.mc_events_global.forEach((events, mcId) => {
+		  Object.keys(events).forEach(eventType => {
+			$(document).off(eventType, `[mc-event-id="${mcId}"]`); // Удаляем возможные дубли
+			events[eventType].forEach(eventObj => {
+			  $(document).on(eventType, `[mc-event-id="${mcId}"]`, eventObj.handler);
+			});
+		  });
+		});
+	}
 
 	static createAnonim_FC(virtualFn, id) {
 		const virtualElement = {

@@ -21,10 +21,6 @@ class MCcontext {
 		this.virtualCollection = new Set();
 	}
 
-	render() {
-		this.virtualCollection;
-	}
-
 	/**
 	 * Функция создания функционального компонента
 	 */

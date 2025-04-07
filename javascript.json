@@ -14,21 +14,21 @@
         ],
         "description": "Create a class extending MC with render method"
     },
-    "U State (MC.uState)": {
+    "Use State (MC.uState)": {
         "prefix": "mc_us",
         "body": [
             "const state = MC.uState(false, '${1:key}');"
         ],
         "description": "Initialize a state with MC.uState"
     },
-    "MC Context (MC.createContext)": {
+    "Create Context (MC.createContext)": {
         "prefix": "mc_cxt",
         "body": [
             "const context = MC.createContext('${1:key}');"
         ],
         "description": "Create a context with MC.createContext"
     },
-    "MC Function ($.MC)": {
+    "MC Function (MC)": {
         "prefix": "mc_f",
         "body": [
             "$.MC((state, reflect) => {",
