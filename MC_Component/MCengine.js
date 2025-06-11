@@ -190,6 +190,7 @@ class MCEngine {
 				}
 			});
 		});
+
 		MCEngine.active = false;
 		return;
 	}
