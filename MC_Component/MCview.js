@@ -210,6 +210,7 @@ class MC_Component_Registration {
 				node.setAttribute('mc', NativeVirtual.key);
 				NativeVirtual.controller = { global: global_st, local: local_st };
 				NativeVirtual.HTMLElement = node;
+				MC.savedEvents(node);
 				return node;
 			}
 		}
@@ -218,9 +219,7 @@ class MC_Component_Registration {
 
 class MC {
 	static keys = [];
-
 	static version = '0.7.0';
-
 	static anonimCollection = new Set();
 	static functionCollecton = new Set();
 	static mc_events_global = new Map();
@@ -238,6 +237,26 @@ class MC {
 			return MC._instance;
 		}
 	}
+
+	static savedEvents(html) {
+		function scanElement(element) {
+		  const events = $._data(element, "events");
+		  if (events) {
+			Object.keys(events).forEach(type => {
+			  events[type].forEach(eventObj => {
+				MCEventManager.bind(element, type, eventObj.handler);
+			  });
+			});
+			$(element).off();
+		  }
+		  $(element).children().each((_, child) => scanElement(child));
+		  return element;
+		}
+	  
+		scanElement(html);
+		MCEventManager.deepRebind(html); // <-- После бинда сразу перевесить на себя (на случай если diff)
+	  }
+
 	/**
 	 * Инициализировать Micro Component
 	 * @param MC_setting:
@@ -298,7 +317,7 @@ class MC {
 							}
 						});
 					}
-
+					MC.savedEvents(node);
 					return node;
 				}
 
@@ -444,6 +463,8 @@ class MC {
 				}
 			}
 
+			
+
 			let resultCall = original$.apply(this, arguments);
 
 			return resultCall;
@@ -452,7 +473,8 @@ class MC {
 		return 'Добро пожаловать в MC.js!';
 	}
 
-	static savedEvents(html) {
+	static old_savedEvents(html) {
+		console.log('first')
 		function scanElement(element) {
 		  const events = $._data(element, "events");
 		  if (events) {
