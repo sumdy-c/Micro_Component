@@ -32,7 +32,6 @@ class MCEventManager {
 	}
 
 	static rebindAll(node) {
-        console.log(node);
 		const id = node.getAttribute('mc-event-id');
 		if (!id) {
             return;

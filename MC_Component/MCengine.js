@@ -76,7 +76,8 @@ class MCEngine {
 						}
 
 						newNode.setAttribute('mc', virtualEl.key);
-						const controlledNode = MCDifference.diffAndApply(virtualEl.HTMLElement, newNode); // MCDifference.diffAndApply(virtualEl.HTMLElement.parentNode, newNode, virtualEl.HTMLElement);
+						MC.savedEvents(newNode);
+						const controlledNode = MCDiffirence.diffAndApply(virtualEl.HTMLElement, newNode);
 						virtualEl.HTMLElement = controlledNode;
 					}
 				});
@@ -116,8 +117,8 @@ class MCEngine {
 
 						newNode.setAttribute('mc', virtualEl.key);
 						
-
-						const controlledNode = MCDifference.diffAndApply(virtualEl.HTMLElement, newNode); //MCDifference.diffAndApply(virtualEl.HTMLElement.parentNode, newNode, virtualEl.HTMLElement);
+						MC.savedEvents(newNode);
+						const controlledNode = MCDiffirence.diffAndApply(virtualEl.HTMLElement, newNode);
 						virtualEl.HTMLElement = controlledNode;
 					}
 				});
@@ -182,15 +183,14 @@ class MCEngine {
 							}
 
 							newNode.setAttribute('mc', virtualEl.key);
-
-							const controlledNode =  MCDifference.diffAndApply(virtualEl.HTMLElement, newNode); // MCDifference.diffAndApply(virtualEl.HTMLElement.parentNode, newNode, virtualEl.HTMLElement);
+							MC.savedEvents(newNode);
+							const controlledNode =  MCDiffirence.diffAndApply(virtualEl.HTMLElement, newNode); // MCDiffirence.diffAndApply(virtualEl.HTMLElement.parentNode, newNode, virtualEl.HTMLElement);
 							virtualEl.HTMLElement = controlledNode;
 						}
 					});
 				}
 			});
 		});
-
 		MCEngine.active = false;
 		return;
 	}
@@ -236,7 +236,12 @@ class MCEngine {
 						newNode.setAttribute('mc', virtual.key);
 
 						virtual.HTMLElement = newNode;
-						node = virtual.HTMLElement;
+						MC.savedEvents(newNode);
+						
+						const controlledNode = MCDiffirence.diffAndApply(virtual.HTMLElement, newNode);
+
+						node = controlledNode; //virtual.HTMLElement;
+						
 					}
 				}
 			});
@@ -406,12 +411,6 @@ class MCEngine {
 							newNode = newNode[0];
 						}
 					}
-
-					// const eventIdAttr = virtual.HTMLElement.getAttribute('mc-event-id');
-						
-					// if(eventIdAttr) {
-					// 	newNode.setAttribute('mc-event-id', eventIdAttr);
-					// }
 
 					newNode.setAttribute('mc', virtual.key);
 					newNode.setAttribute('mc_context', service.context.id);
