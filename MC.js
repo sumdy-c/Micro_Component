@@ -1004,7 +1004,7 @@ class MC {
 	 * @argument { object: states, props, context }
 	 * @param states: MCstate[] - предоствлять глобальное состояние
 	 * @param props: <any_entity> - предоствлять как обновляемый реквизит
-	 * @param context: MCcontext - заколючить компонент в выделенную область видимости
+	 * @param context: MCcontext - заключить компонент в выделенную область видимости
 	 */
 	static Props(props_object) {
 		const props = [];
