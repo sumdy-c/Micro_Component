@@ -1,5 +1,5 @@
-// v7
-
+// v7 -
+// Проблема с обновлении интерфейса
 class MCState {
 	/**
 	 * id состояния
@@ -42,6 +42,16 @@ class MCState {
 	local;
 
 	/**
+	 * @deprecated Обозначение гостевого состояния
+	 */
+	guestState;
+
+	/**
+	 * Свойство неверной привязки состояния
+	 */
+	incorrectStateBindError;
+
+	/**
 	 * Внутренние оптимизации
 	 */
 	_version = 0;
@@ -63,6 +73,8 @@ class MCState {
 
 		const { value, traceKey, id } = stateParam;
 		this.value = value;
+		this.guestState = false;
+		this.incorrectStateBindError = false;
 		this.traceKey = traceKey;
 		this.id = id;
 		this.virtualCollection = new Set();
@@ -104,7 +116,10 @@ class MCState {
 					// быстрый shallow check по === для элементов
 					let sameRefElements = true;
 					for (let i = 0; i < this.value.length; i++) {
-						if (this.value[i] !== newValue[i]) { sameRefElements = false; break; }
+						if (this.value[i] !== newValue[i]) {
+							sameRefElements = false;
+							break;
+						}
 					}
 					if (sameRefElements) fastEqual = true;
 				}
@@ -289,7 +304,10 @@ class MCState {
 			for (const ai of a) {
 				let found = false;
 				for (const bi of b) {
-					if (MCState.deepEqual(ai, bi)) { found = true; break; }
+					if (MCState.deepEqual(ai, bi)) {
+						found = true;
+						break;
+					}
 				}
 				if (!found) return false;
 			}
@@ -307,7 +325,8 @@ class MCState {
 			if (seen.has(x)) return seen.get(x) === y;
 			seen.set(x, y);
 
-			const isArrX = Array.isArray(x), isArrY = Array.isArray(y);
+			const isArrX = Array.isArray(x),
+				isArrY = Array.isArray(y);
 			if (isArrX !== isArrY) return false;
 			if (isArrX && isArrY) {
 				if (x.length !== y.length) return false;
@@ -407,9 +426,7 @@ class MCLog {
 	 */
 	constructor(component) {
 		if (!component) {
-			console.error(
-				'Ошибка инициализации логирования для ресурсов MC.'
-			);
+			console.error('Ошибка инициализации логирования для ресурсов MC.');
 			return;
 		}
 
@@ -459,6 +476,7 @@ class MCEngine {
 		if (!path) {
 			path = 'obj';
 		}
+
 		const proxy = new Proxy(target, {
 			get: (_, prop) => {
 				if (typeof target[prop] != 'object') {
@@ -470,10 +488,15 @@ class MCEngine {
 				return Reflect.get(...arguments);
 			},
 			set: (_, prop) => {
-				fn(state, this.mc, this);
-				return target[prop];
+				try {
+					fn(state, this.mc, this);
+					return target[prop];
+				} catch (error) {
+					console.log(error);
+				}
 			},
 		});
+
 		return proxy;
 	}
 
@@ -501,16 +524,20 @@ class MCEngine {
 	}
 
 	/**
-	 * формирование состояния реквизита
-	 */	
+	 * Формирование состояния реквизита
+	 */
 	formationStates(VDOM) {
 		const stateObject = {
 			global: [],
 			local: [],
-		}
+		};
 
-		for(const state of VDOM.normalized.states) {
-			if(state.local) {
+		for (const state of VDOM.normalized.states) {
+			if (state.incorrectStateBindError) {
+				continue;
+			}
+
+			if (state.local) {
 				stateObject.local.push(state.get());
 			} else {
 				stateObject.global.push(state.get());
@@ -521,15 +548,14 @@ class MCEngine {
 	}
 
 	diffingComponent(VDOM) {
-		if(this.mc.constructor.name !== 'MC') {
+		if (this.mc.constructor.name !== 'MC') {
 			this.mc = this.mc.mc;
 		}
-		
+
 		this.mc.setCurrentRenderingInstance(VDOM.key);
 		const stateObject = this.formationStates(VDOM);
 		const JQ_CONTAINER = VDOM.draw.call(VDOM.component, stateObject, VDOM.normalized.props, VDOM);
 		this.mc.resetCurrentRenderingInstance();
-
 		const NEW_HTML = this.jqToHtml(JQ_CONTAINER) ?? new MC_Element().createEmptyElement();
 		VDOM.HTML = this.diff.start(VDOM.HTML, NEW_HTML);
 		VDOM.HTML.instanceMC = VDOM.id;
@@ -537,13 +563,13 @@ class MCEngine {
 	}
 
 	/**
-	 * Обновить ссылку на компонент для дочернего VDOM 
+	 * Обновить ссылку на компонент для дочернего VDOM
 	 */
 	rerender(VDOM, type = 'fn') {
 		let NEW_HTML = null;
 
-		if(type === 'mc_component') {
-			if(this.mc.constructor.name !== 'MC') {
+		if (type === 'mc_component') {
+			if (this.mc.constructor.name !== 'MC') {
 				this.mc = this.mc.mc;
 			}
 
@@ -552,20 +578,18 @@ class MCEngine {
 			const JQ_CONTAINER = VDOM.draw.call(VDOM.component, stateObject, VDOM.normalized.props, VDOM);
 			this.mc.deleteKeyCurrentRenderingInstance(VDOM.component.uniquekey);
 			NEW_HTML = this.jqToHtml(JQ_CONTAINER) ?? new MC_Element().createEmptyElement();
-			NEW_HTML.instanceMC = VDOM.id;
-			NEW_HTML.instanceMCtype = 'mc_component';
+			VDOM.HTML = NEW_HTML;
+			VDOM.HTML.instanceMC = VDOM.id;
+			VDOM.HTML.instanceMCtype = 'mc_component';
 		} else {
 			const JQ_CONTAINER = VDOM.draw(this.getArrayValuesStates(VDOM));
 			NEW_HTML = this.jqToHtml(JQ_CONTAINER) ?? new MC_Element().createEmptyElement();
-			NEW_HTML.instanceMC = VDOM.id;
-			NEW_HTML.instanceMCtype = 'fn';
+			VDOM.HTML = NEW_HTML;
+			VDOM.HTML.instanceMC = VDOM.id;
+			VDOM.HTML.instanceMCtype = 'fn';
 		}
 
-		/**
-		 * Записываем id контейнера в атрибут нового html при ререндере. При переборе атрибутов MCDiff найдет, и вернет HTML в контейнер VDOM
-		 */
-		// NEW_HTML.setAttribute('mc_rnd_model_controlled', VDOM.id);
-		return NEW_HTML;
+		return VDOM.HTML;
 	}
 
 	render(state, mc, engine) {
@@ -575,10 +599,10 @@ class MCEngine {
 	}
 
 	/**
-	 * Контролируемый рендер для классового компонента 
+	 * Контролируемый рендер для классового компонента
 	 */
 	controlledRender(VDOM, type = 'mc_component') {
-		if(type === 'mc_component') {
+		if (type === 'mc_component') {
 			this.diffingComponent(VDOM);
 			return;
 		}
@@ -591,6 +615,10 @@ class MCEngine {
 	}
 
 	renderFunctionContainer(state, mc) {
+		if (mc.constructor.name !== 'MC') {
+			mc = mc.mc;
+		}
+
 		state.fcCollection.forEach((item) => {
 			const virtual = mc.fcCollection.get(item.effectKey);
 			const value = virtual.states.get(state.id);
@@ -603,7 +631,11 @@ class MCEngine {
 	}
 
 	renderComponentWork(state, mc) {
-		state.virtualCollection.forEach(item => {
+		if (mc.constructor.name !== 'MC') {
+			mc = mc.mc;
+		}
+
+		state.virtualCollection.forEach((item) => {
 			const virtual = mc.componentCollection.get(item.effectKey);
 			const value = virtual.states.get(state.id);
 
@@ -615,7 +647,11 @@ class MCEngine {
 	}
 
 	runEffectWork(state, mc) {
-		state.effectCollection.forEach(item => {
+		if (mc.constructor.name !== 'MC') {
+			mc = mc.mc;
+		}
+
+		state.effectCollection.forEach((item) => {
 			const effect = mc.effectCollection.get(item.effectKey);
 			const value = effect.states.get(state.id);
 
@@ -642,11 +678,11 @@ class MC_Element {
 		return this.getComponent(html);
 	}
 
-    setAttributes(component) {
-        component.HTML.setAttribute('style', 'height: 0; width: 0; display: none;');
-    }
-	
-    createEmptyElement() {
+	setAttributes(component) {
+		component.HTML.setAttribute('style', 'height: 0; width: 0; display: none;');
+	}
+
+	createEmptyElement() {
 		const micro_component = document.createElement('mc');
 		micro_component.setAttribute('style', 'height: 0; width: 0; display: none;');
 
@@ -677,6 +713,68 @@ class ServiceDiff {
 	}
 }
 
+// TODO [MCv8]: Переработка событийной модели
+//
+// Цель: создать высокооптимизированную и надежную систему управления событиями для MCv8,
+// устраняющую текущие ограничения:
+//   1. Потеря ссылок на обработчики при ререндере и невозможность корректного removeEventListener.
+//   2. Ненадежная дифференциация старых и новых обработчиков.
+//   3. Избыточное использование jQuery для unbind/on, влияющее на производительность и размер бандла.
+//   4. Нет прозрачной поддержки делегирования и контекста событий.
+// =====
+//   - Разработать внутреннюю структуру хранения обработчиков, которая сохраняет точные ссылки
+//     и контексты, чтобы removeEventListener всегда работал.
+//   - Обеспечить корректное сравнение старых и новых событий при дифференциации (diff).
+//   - Добавить поддержку делегирования событий для минимизации количества слушателей.
+//   - Обеспечить минимальный overhead при массовом ререндере большого количества узлов.
+class EventDiff {
+	diffEvents(oldNode, newNode, ctx) {
+		const oldEvents = oldNode.__mcEvents || {};
+		const newEvents = newNode.__mcEvents || {};
+
+		const set = {};
+		const remove = [];
+
+		for (const ev in newEvents) {
+			set[ev] = newEvents[ev];
+		}
+		for (const ev in oldEvents) {
+			remove.push(ev);
+		}
+
+		return { set, remove, ctx };
+	}
+
+	applyEvents(patch, domNode) {
+		if (!patch) {
+			return;
+		}
+		domNode.__mcBound = domNode.__mcBound || {};
+
+		(patch.remove || []).forEach((ev) => {
+			if (domNode.__mcBound[ev]) {
+				domNode.__mcBound[ev].forEach((fn) => {
+					$(domNode).unbind(ev);
+				});
+
+				delete domNode.__mcBound[ev];
+			}
+		});
+
+		// навесить новые
+		for (const [ev, fnArr] of Object.entries(patch.set || {})) {
+			if (fnArr && fnArr.length) {
+				for (let fn of fnArr) {
+					$(domNode).on(ev, fn);
+
+					domNode.__mcBound[ev] = domNode.__mcBound[ev] || [];
+					domNode.__mcBound[ev].push(fn);
+				}
+			}
+		}
+	}
+}
+
 class AttrDiff {
 	/**
 	 * Сервисные функции
@@ -695,14 +793,13 @@ class AttrDiff {
 
 	diffAttributes(oldNode, newNode, ctx) {
 		const oldAttrs = oldNode.attributes ? Array.from(oldNode.attributes) : [];
-		const newAttrs = newNode.attributes ? Array.from(newNode.attributes) : [] 
-		
+		const newAttrs = newNode.attributes ? Array.from(newNode.attributes) : [];
+
 		/**
 		 * @deprecated ранее искал атрибуты для восстановления связей
-		 * const newAttrs = newNode.attributes ? 
-		 * Array.from(newNode.attributes).filter((item) => !this.serviceDiff.checkServiceAttribute(item.name)) : []; 
+		 * const newAttrs = newNode.attributes ?
+		 * Array.from(newNode.attributes).filter((item) => !this.serviceDiff.checkServiceAttribute(item.name)) : [];
 		 */
-
 		const set = {};
 		const remove = [];
 		// const service = {};
@@ -802,10 +899,11 @@ class MasterDiff {
 	 */
 	serviceDiff;
 
-	constructor(attrDiff, styleDiff, classDiff) {
+	constructor(attrDiff, styleDiff, classDiff, eventDiff) {
 		this.attrDiff = attrDiff;
 		this.styleDiff = styleDiff;
 		this.classDiff = classDiff;
+		this.eventDiff = eventDiff;
 	}
 	/**
 	 * Основная функция сравнения двух узлов
@@ -868,6 +966,13 @@ class MasterDiff {
 			const attrPatch = this.attrDiff.diffAttributes(oldNode, newNode, context);
 			const stylePatch = this.styleDiff.diffStyles(oldNode, newNode, context);
 			const classPatch = this.classDiff.diffClasses(oldNode, newNode, context);
+			const eventPatch = this.eventDiff.diffEvents(oldNode, newNode, context);
+
+			if(oldNode.instanceMC && newNode.instanceMC) {
+				if(oldNode.instanceMC !== newNode.instanceMC) {
+					oldNode.instanceMC = newNode.instanceMC;
+				}
+			}
 
 			// Дети
 			const childrenPatch = this.diffChildren(oldNode, newNode, context);
@@ -877,6 +982,7 @@ class MasterDiff {
 				attrPatch,
 				stylePatch,
 				classPatch,
+				eventPatch,
 				childrenPatch,
 				ctx: context,
 			};
@@ -897,7 +1003,7 @@ class MasterDiff {
 		const childPatches = [];
 
 		for (let i = 0; i < maxLen; i++) {
-			const path = context.path + '/' + i;
+			const path = context.path + '/' + i; // глубина
 			childPatches.push(this.diffNode(oldChildren[i], newChildren[i], { ...context, path }));
 		}
 		return { type: 'CHILDREN', patches: childPatches, ctx: context };
@@ -924,25 +1030,30 @@ class PatchMaster {
 	serviceDiff;
 
 	/**
+	 * Сравнение событий
+	 */
+	eventDiff;
+
+	/**
 	 * Экземпляр MC
 	 */
 	mc;
 
-	constructor(attrDiff, styleDiff, classDiff, mc) {
+	constructor(attrDiff, styleDiff, classDiff, eventDiff, mc) {
 		this.attrDiff = attrDiff;
 		this.styleDiff = styleDiff;
 		this.classDiff = classDiff;
+		this.eventDiff = eventDiff;
 		this.mc = mc;
 	}
 
 	reconnectingVDOM(rootNode) {
-
 		const processEl = (el) => {
-			if(!el.instanceMC) {
+			if (!el.instanceMC) {
 				return;
 			}
-			
-			if(el.instanceMCtype === 'fn') {
+
+			if (el.instanceMCtype === 'fn') {
 				const key = el.instanceMC;
 				const vdom = this.mc.fcCollection.get(this.mc.fcIdsCollection.get(key));
 
@@ -950,11 +1061,11 @@ class PatchMaster {
 					vdom.HTML = el;
 				}
 			}
-			
-			if(el.instanceMCtype === 'mc_component') {
+
+			if (el.instanceMCtype === 'mc_component') {
 				const key = el.instanceMC;
-				
-				if(this.mc.constructor.name !== 'MC') {
+
+				if (this.mc.constructor.name !== 'MC') {
 					this.mc = this.mc.mc;
 				}
 
@@ -975,9 +1086,7 @@ class PatchMaster {
 			NodeFilter.SHOW_ELEMENT,
 			{
 				acceptNode(node) {
-					return node.instanceMC
-						? NodeFilter.FILTER_ACCEPT
-						: NodeFilter.FILTER_SKIP;
+					return node.instanceMC ? NodeFilter.FILTER_ACCEPT : NodeFilter.FILTER_SKIP;
 				},
 			},
 			false
@@ -985,7 +1094,6 @@ class PatchMaster {
 
 		let node = walker.nextNode();
 		while (node) {
-
 			processEl(node);
 			node = walker.nextNode();
 		}
@@ -1004,19 +1112,19 @@ class PatchMaster {
 		switch (patch.type) {
 			case 'ADD':
 				if (domNode && domNode.parentNode) {
-					this.reconnectingVDOM(patch.node);
 					domNode.parentNode.appendChild(patch.node);
 				}
 				return patch.node;
 			case 'REMOVE':
 				if (domNode && domNode.parentNode) {
 					domNode.parentNode.removeChild(domNode);
+					this.reconnectingVDOM(patch.node);
 				}
 				return null;
 			case 'REPLACE':
 				if (domNode && domNode.parentNode) {
-					this.reconnectingVDOM(patch.node);
 					domNode.parentNode.replaceChild(patch.node, domNode);
+					this.reconnectingVDOM(patch.node);
 					return patch.node;
 				}
 				return patch.node;
@@ -1030,14 +1138,14 @@ class PatchMaster {
 				// Если текущий узел есть, но не текстовый — заменяем его текстовым узлом
 				if (domNode && domNode.parentNode) {
 					const textNode = document.createTextNode(patch.text);
-					domNode.parentNode.replaceChild(textNode, domNode);
+					domNode.parentNode.replaceChild(textNode, patch.node);
 					return textNode;
 				}
 
 				// Нет текущего узла — создаём и возвращаем новый текстовый узел
 				return document.createTextNode(patch.text);
-				}
-				case 'COMMENT': {
+			}
+			case 'COMMENT': {
 				if (domNode && domNode.nodeType === Node.COMMENT_NODE) {
 					domNode.nodeValue = patch.text;
 					return domNode;
@@ -1056,8 +1164,11 @@ class PatchMaster {
 				this.styleDiff.applyStyles(patch.stylePatch, domNode);
 				// Классы
 				this.classDiff.applyClasses(patch.classPatch, domNode);
+				// События
+				this.eventDiff.applyEvents(patch.eventPatch, domNode);
 				// Дети
 				this.applyPatch(patch.childrenPatch, domNode, context);
+				this.reconnectingVDOM(domNode);
 				return domNode;
 			case 'CHILDREN':
 				this._applyChildren(patch.patches, domNode, context);
@@ -1096,6 +1207,7 @@ class PatchMaster {
 			// RECURSIVE
 			if (child && patch) {
 				this.applyPatch(patch, child, ctx);
+				this.reconnectingVDOM(child);
 			}
 		}
 		// Если новые дети длиннее старых — добавить недостающих
@@ -1119,20 +1231,84 @@ class MCDiff {
 	 */
 	patch;
 
+	/**
+	 * desc
+	 */
+	mc;
+
 	constructor(mc) {
 		const serviceDiff = new ServiceDiff();
 		const attrDiff = new AttrDiff(serviceDiff, mc);
 		const styleDiff = new StyleDiff(serviceDiff);
 		const classDiff = new ClassDiff(serviceDiff);
+		const eventDiff = new EventDiff();
 
-		this.master = new MasterDiff(attrDiff, styleDiff, classDiff);
-		this.patch = new PatchMaster(attrDiff, styleDiff, classDiff, mc);
+		this.master = new MasterDiff(attrDiff, styleDiff, classDiff, eventDiff);
+		this.patch = new PatchMaster(attrDiff, styleDiff, classDiff, eventDiff, mc);
+		this.mc = mc;
+	}
+
+	reconnectingVDOM(rootNode) {
+		const processEl = (el) => {
+			if (!el.instanceMC) {
+				return;
+			}
+
+			if (el.instanceMCtype === 'fn') {
+				const key = el.instanceMC;
+				const vdom = this.mc.fcCollection.get(this.mc.fcIdsCollection.get(key));
+
+				if (vdom) {
+					vdom.HTML = el;
+				}
+			}
+
+			if (el.instanceMCtype === 'mc_component') {
+				const key = el.instanceMC;
+
+				if (this.mc.constructor.name !== 'MC') {
+					this.mc = this.mc.mc;
+				}
+
+				const vdom = this.mc.componentCollection.get(this.mc.componentIdsCollection.get(key));
+
+				if (vdom) {
+					vdom.HTML = el;
+				}
+			}
+		};
+
+		if (rootNode.nodeType === 1 && rootNode.instanceMC) {
+			processEl(rootNode);
+		}
+
+		const walker = document.createTreeWalker(
+			rootNode,
+			NodeFilter.SHOW_ELEMENT,
+			{
+				acceptNode(node) {
+					return node.instanceMC ? NodeFilter.FILTER_ACCEPT : NodeFilter.FILTER_SKIP;
+				},
+			},
+			false
+		);
+
+		let node = walker.nextNode();
+		while (node) {
+			processEl(node);
+			node = walker.nextNode();
+		}
 	}
 
 	start(oldNode, newNode) {
 		try {
 			const trace = this.master.diffNode(oldNode, newNode, { level: 0, path: '' });
 			const node = this.patch.applyPatch(trace, oldNode, { level: 0, path: '' });
+
+			if (globalThis.logOn) {
+				console.log(node);
+			}
+
 			return node;
 		} catch (e) {
 			throw e;
@@ -1151,7 +1327,7 @@ class MC_Component {
 	}
 
 	createNewInstance(normalized) {
-		const instance = new normalized.component;
+		const instance = new normalized.component(normalized.props, normalized.context, normalized.uniquekey);
 		instance.mc = this.mc;
 		return instance;
 	}
@@ -1160,34 +1336,36 @@ class MC_Component {
 		const instance = this.createNewInstance(normalized);
 		instance.uniquekey = normalized.uniquekey;
 		instance.parentKey = this.mc.getCurrentRenderingInstance();
-		
+
 		const virtualElement = {
 			draw: instance.render,
 			mounted: instance.mounted ? instance.mounted : () => {},
-			unmounted: instance.unmounted ? instance.unmounted : () => {}, 
+			unmounted: instance.unmounted ? instance.unmounted : () => {},
 			key: normalized.key,
 			id,
 			states: new Map(),
 			context: normalized.context,
 			HTML: new MC_Element().createEmptyElement(),
 			normalized: normalized,
-			component: instance
-    	};
+			component: instance,
+		};
 
-		for(const prop in instance) {
-			if(instance[prop] instanceof MCState) {
+		for (const prop in instance) {
+			if (instance[prop] instanceof MCState) {
 				const localState = instance[prop];
 
-				localState.traceKey = `lcl_state_${normalized.key}`;
-				normalized.states.push(instance[prop]);
+				if (localState.local && !localState.traceKey) {
+					localState.traceKey = `lcl_state_${normalized.key}`;
+					normalized.states.push(instance[prop]);
+				}
 
 				instance.componentCollection.set(normalized.key, virtualElement);
-				instance.componentIdsCollection.set(id, normalized.key);	
+				instance.componentIdsCollection.set(id, normalized.key);
 			}
 		}
 
 		this.mc.componentCollection.set(normalized.key, virtualElement);
-		this.mc.componentIdsCollection.set(id, normalized.key);	
+		this.mc.componentIdsCollection.set(id, normalized.key);
 
 		return virtualElement;
 	}
@@ -1195,9 +1373,9 @@ class MC_Component {
 	register(normalized, id) {
 		const NativeVirtual = this.createSignatureComponent(normalized, id);
 
-		if(normalized.states.length) {
-			for(const state of normalized.states) {
-				if (state.__proto__.constructor.name === 'MCState') {
+		if (normalized.states.length) {
+			for (const state of normalized.states) {
+				if (this.mc.isStateLike(state)) {
 					state.virtualCollection.add({ effectKey: NativeVirtual.key });
 					NativeVirtual.states.set(state.id, state.value);
 				} else {
@@ -1208,7 +1386,7 @@ class MC_Component {
 			}
 		}
 
-		this.start(NativeVirtual, normalized);
+		this.start(NativeVirtual);
 
 		NativeVirtual.HTML.instanceMC = NativeVirtual.id;
 		NativeVirtual.HTML.instanceMCtype = 'mc_component';
@@ -1216,21 +1394,13 @@ class MC_Component {
 		return NativeVirtual.HTML;
 	}
 
-	start(NativeVirtual, normalized) {
-		const dependency = normalized.states;
-
-		if(this.mc.getCurrentRenderingInstance()) {
+	start(NativeVirtual) {
+		if (this.mc.getCurrentRenderingInstance()) {
 			NativeVirtual.HTML = this.mc.engine.rerender(NativeVirtual, 'mc_component');
 			return;
 		}
-		
-		if (dependency && dependency.length) {
-			const [ firstState ] = dependency;
-			NativeVirtual.states.set(firstState.id, `reset_state_initial_${this.mc.uuidv4()}`);
-			firstState.initial();
-		} else {
-			this.mc.engine.controlledRender(NativeVirtual, 'mc_component');
-		}
+
+		this.mc.engine.controlledRender(NativeVirtual, 'mc_component');
 	}
 }
 
@@ -1257,9 +1427,6 @@ class MCcontext {
 		this.virtualCollection = new Set();
 	}
 
-	/**
-	 * Функция создания классового компонента
-	 */
 	create(component, id, key) {
 		const virtualElement = {
 			component: component,
@@ -1274,6 +1441,7 @@ class MCcontext {
 	}
 }
 
+const _mc_instance_restore_object = { instance: null };
 /**
  * MCv7
  * Основная сущность для взаимодейтвия MC
@@ -1400,14 +1568,50 @@ class MC {
 		}
 
 		this.mc = new MC();
+		_mc_instance_restore_object.instance = this.mc;
 		// основной контейнер MC
 		window.$.MC = this.mc.use.bind(this);
 		window.$.MC.memo = this.mc.useMemo.bind(this);
 		window.$.MC.effect = this.mc.useEffect.bind(this);
 		window.iMC = this.mc;
 		window.iMC.mc = this;
-		
-		// Активация DF 
+
+		// Сохраняем оригинальный .on
+		const oldOn = window.$.fn.on;
+
+		window.$.fn.on = function (type, selector, data, fn) {
+			let handler;
+
+			// Обработка перегрузок jQuery
+			if (typeof selector === 'function') {
+				handler = selector;
+			} else if (typeof fn === 'function') {
+				handler = fn;
+			} else {
+				return oldOn.apply(this, arguments);
+			}
+
+			// Берём чистый DOM-узел
+			const el = this[0];
+			if (el) {
+				// Инициализация контейнеров
+				el.__mcBound = el.__mcBound || {};
+				el.__mcEvents = el.__mcEvents || {};
+
+				// Создаём массив для каждого типа события
+				if (!el.__mcBound[type]) el.__mcBound[type] = [];
+				if (!el.__mcEvents[type]) el.__mcEvents[type] = [];
+
+				// Сохраняем обработчик
+				el.__mcBound[type].push(handler);
+				el.__mcEvents[type].push(handler);
+			}
+
+			// Вызов оригинального .on
+			return oldOn.apply(this, arguments);
+		};
+
+		// Активация DF
 		// MC.enableFragmentShortSyntax();
 	}
 
@@ -1520,6 +1724,44 @@ class MC {
 		return this.mc.createContext(key);
 	}
 
+	/**
+	 * Получить стейт по ключу
+	 */
+	static getState(key) {
+		const state = [];
+
+		if (!key) {
+			this.mc.mc_state_global.forEach((item) => {
+				state.push(item);
+			});
+
+			return state;
+		}
+
+		this.mc.mc_state_global.forEach((item) => {
+			if (item.traceKey === key) {
+				state.push(item);
+			}
+		});
+
+		return state;
+	}
+
+	/**
+	 * Получить контекст по ключу
+	 * @param { string } key ключ для получения контекста
+	 * @returns
+	 */
+	static getContext(key) {
+		let context;
+		this.mc.mc_context_global.forEach((item) => {
+			if (item.key === key) {
+				context = item;
+			}
+		});
+		return context;
+	}
+
 	setCurrentRenderingInstance(key) {
 		this.currentRenderingInstance.add(key);
 	}
@@ -1553,7 +1795,7 @@ class MC {
 	}
 
 	/**
-	 * Получить контекст по ключук
+	 * Получить контекст по ключу
 	 * @param { string } key ключ для получения контекста
 	 * @returns
 	 */
@@ -1619,7 +1861,6 @@ class MC {
 		const state = new MCState(stateParam);
 
 		this.engine.registrController(state);
-
 		this.mc_state_global.add(state);
 
 		return state;
@@ -1652,7 +1893,7 @@ class MC {
 
 		this.engine.registrController(state);
 
-		this.mc_state_global.add(state);
+		_mc_instance_restore_object.instance.mc_state_global.add(state);
 
 		return state;
 	}
@@ -1699,7 +1940,7 @@ class MC {
 		}
 
 		// сборка мертвых контейнеров
-		this.checkAllDeadsFunctionsContainers();
+		// this.checkAllDeadsFunctionsContainers();
 
 		return this.workFunctionContainer(virtual, instruction === 'memo');
 	}
@@ -1758,7 +1999,6 @@ class MC {
 
 		dependency &&
 			dependency.map((state) => {
-				// Перед выпуском, рассмотри тут instanceof
 				if (this.isStateLike(state)) {
 					state.fcCollection.add({ effectKey: NativeVirtual.key });
 					NativeVirtual.states.set(state.id, state.value);
@@ -1917,6 +2157,12 @@ class MC {
 					]);
 				}
 			});
+
+		NativeVirtual.run(NativeVirtual.states.values());
+
+		if (!dependency.length) {
+			NativeVirtual.run(NativeVirtual.states.values());
+		}
 	}
 
 	getEffectVirtual(component, iteratorKey = '') {
@@ -2001,11 +2247,40 @@ class MC {
 			}
 
 			if (this.isStateLike(arg)) {
+				if (arg.local) {
+					arg.incorrectStateBindError = true;
+
+					this.log.error('Неправильное назначение', [
+						'Локальное состояние компонента не может быть привязано к дочерним компонентам.' +
+							'\n Привязка приведёт к избыточным ререндерингам и потенциальным непредсказуемым побочным эффектам.' +
+							'\n Используйте пропсы или контекстное/глобальное состояние для передачи данных вниз по дереву компонентов.',
+						`traceKey:: ${arg.traceKey}`,
+					]);
+					continue;
+				}
+
 				normalized.states.push(arg);
 				continue;
 			}
 
 			if (Array.isArray(arg) && arg.every((item) => this.isStateLike(item))) {
+				let err = false;
+				arg.forEach((state) => {
+					if (state.local) {
+						err = true;
+						state.incorrectStateBindError = true;
+						this.log.error('Неправильное назначение', [
+							'Локальное состояние компонента не может быть привязано к дочерним компонентам.' +
+								'\n Привязка приведёт к избыточным ререндерингам и потенциальным непредсказуемым побочным эффектам.' +
+								'\n Используйте пропсы или контекстное/глобальное состояние для передачи данных вниз по дереву компонентов.',
+							`traceKey:: ${state.traceKey}`,
+						]);
+					}
+				});
+
+				if (err) {
+					continue;
+				}
 				normalized.states.push(...arg);
 				continue;
 			}
@@ -2021,7 +2296,6 @@ class MC {
 			}
 
 			if (arg != null && typeof arg === 'object') {
-				// shallow copy props (мы не сериализуем значения здесь)
 				normalized.props = Object.assign({}, arg);
 				continue;
 			}
