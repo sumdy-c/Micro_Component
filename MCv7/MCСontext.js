@@ -21,9 +21,6 @@ class MCcontext {
 		this.virtualCollection = new Set();
 	}
 
-	/**
-	 * Функция создания классового компонента
-	 */
 	create(component, id, key) {
 		const virtualElement = {
 			component: component,

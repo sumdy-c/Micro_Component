@@ -11,9 +11,7 @@ class MCLog {
 	 */
 	constructor(component) {
 		if (!component) {
-			console.error(
-				'Ошибка инициализации логирования для ресурсов MC.'
-			);
+			console.error('Ошибка инициализации логирования для ресурсов MC.');
 			return;
 		}
 

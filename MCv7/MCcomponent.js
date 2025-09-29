@@ -9,7 +9,7 @@ class MC_Component {
 	}
 
 	createNewInstance(normalized) {
-		const instance = new normalized.component;
+		const instance = new normalized.component(normalized.props, normalized.context, normalized.uniquekey);
 		instance.mc = this.mc;
 		return instance;
 	}
@@ -18,34 +18,36 @@ class MC_Component {
 		const instance = this.createNewInstance(normalized);
 		instance.uniquekey = normalized.uniquekey;
 		instance.parentKey = this.mc.getCurrentRenderingInstance();
-		
+
 		const virtualElement = {
 			draw: instance.render,
 			mounted: instance.mounted ? instance.mounted : () => {},
-			unmounted: instance.unmounted ? instance.unmounted : () => {}, 
+			unmounted: instance.unmounted ? instance.unmounted : () => {},
 			key: normalized.key,
 			id,
 			states: new Map(),
 			context: normalized.context,
 			HTML: new MC_Element().createEmptyElement(),
 			normalized: normalized,
-			component: instance
-    	};
+			component: instance,
+		};
 
-		for(const prop in instance) {
-			if(instance[prop] instanceof MCState) {
+		for (const prop in instance) {
+			if (instance[prop] instanceof MCState) {
 				const localState = instance[prop];
 
-				localState.traceKey = `lcl_state_${normalized.key}`;
-				normalized.states.push(instance[prop]);
+				if (localState.local && !localState.traceKey) {
+					localState.traceKey = `lcl_state_${normalized.key}`;
+					normalized.states.push(instance[prop]);
+				}
 
 				instance.componentCollection.set(normalized.key, virtualElement);
-				instance.componentIdsCollection.set(id, normalized.key);	
+				instance.componentIdsCollection.set(id, normalized.key);
 			}
 		}
 
 		this.mc.componentCollection.set(normalized.key, virtualElement);
-		this.mc.componentIdsCollection.set(id, normalized.key);	
+		this.mc.componentIdsCollection.set(id, normalized.key);
 
 		return virtualElement;
 	}
@@ -53,9 +55,9 @@ class MC_Component {
 	register(normalized, id) {
 		const NativeVirtual = this.createSignatureComponent(normalized, id);
 
-		if(normalized.states.length) {
-			for(const state of normalized.states) {
-				if (state.__proto__.constructor.name === 'MCState') {
+		if (normalized.states.length) {
+			for (const state of normalized.states) {
+				if (this.mc.isStateLike(state)) {
 					state.virtualCollection.add({ effectKey: NativeVirtual.key });
 					NativeVirtual.states.set(state.id, state.value);
 				} else {
@@ -66,7 +68,7 @@ class MC_Component {
 			}
 		}
 
-		this.start(NativeVirtual, normalized);
+		this.start(NativeVirtual);
 
 		NativeVirtual.HTML.instanceMC = NativeVirtual.id;
 		NativeVirtual.HTML.instanceMCtype = 'mc_component';
@@ -74,20 +76,12 @@ class MC_Component {
 		return NativeVirtual.HTML;
 	}
 
-	start(NativeVirtual, normalized) {
-		const dependency = normalized.states;
-
-		if(this.mc.getCurrentRenderingInstance()) {
+	start(NativeVirtual) {
+		if (this.mc.getCurrentRenderingInstance()) {
 			NativeVirtual.HTML = this.mc.engine.rerender(NativeVirtual, 'mc_component');
 			return;
 		}
-		
-		if (dependency && dependency.length) {
-			const [ firstState ] = dependency;
-			NativeVirtual.states.set(firstState.id, `reset_state_initial_${this.mc.uuidv4()}`);
-			firstState.initial();
-		} else {
-			this.mc.engine.controlledRender(NativeVirtual, 'mc_component');
-		}
+
+		this.mc.engine.controlledRender(NativeVirtual, 'mc_component');
 	}
 }

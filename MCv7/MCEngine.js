@@ -12,6 +12,7 @@ class MCEngine {
 		if (!path) {
 			path = 'obj';
 		}
+
 		const proxy = new Proxy(target, {
 			get: (_, prop) => {
 				if (typeof target[prop] != 'object') {
@@ -23,10 +24,15 @@ class MCEngine {
 				return Reflect.get(...arguments);
 			},
 			set: (_, prop) => {
-				fn(state, this.mc, this);
-				return target[prop];
+				try {
+					fn(state, this.mc, this);
+					return target[prop];
+				} catch (error) {
+					console.log(error);
+				}
 			},
 		});
+
 		return proxy;
 	}
 
@@ -54,16 +60,20 @@ class MCEngine {
 	}
 
 	/**
-	 * формирование состояния реквизита
-	 */	
+	 * Формирование состояния реквизита
+	 */
 	formationStates(VDOM) {
 		const stateObject = {
 			global: [],
 			local: [],
-		}
+		};
 
-		for(const state of VDOM.normalized.states) {
-			if(state.local) {
+		for (const state of VDOM.normalized.states) {
+			if (state.incorrectStateBindError) {
+				continue;
+			}
+
+			if (state.local) {
 				stateObject.local.push(state.get());
 			} else {
 				stateObject.global.push(state.get());
@@ -74,15 +84,14 @@ class MCEngine {
 	}
 
 	diffingComponent(VDOM) {
-		if(this.mc.constructor.name !== 'MC') {
+		if (this.mc.constructor.name !== 'MC') {
 			this.mc = this.mc.mc;
 		}
-		
+
 		this.mc.setCurrentRenderingInstance(VDOM.key);
 		const stateObject = this.formationStates(VDOM);
 		const JQ_CONTAINER = VDOM.draw.call(VDOM.component, stateObject, VDOM.normalized.props, VDOM);
 		this.mc.resetCurrentRenderingInstance();
-
 		const NEW_HTML = this.jqToHtml(JQ_CONTAINER) ?? new MC_Element().createEmptyElement();
 		VDOM.HTML = this.diff.start(VDOM.HTML, NEW_HTML);
 		VDOM.HTML.instanceMC = VDOM.id;
@@ -90,13 +99,13 @@ class MCEngine {
 	}
 
 	/**
-	 * Обновить ссылку на компонент для дочернего VDOM 
+	 * Обновить ссылку на компонент для дочернего VDOM
 	 */
 	rerender(VDOM, type = 'fn') {
 		let NEW_HTML = null;
 
-		if(type === 'mc_component') {
-			if(this.mc.constructor.name !== 'MC') {
+		if (type === 'mc_component') {
+			if (this.mc.constructor.name !== 'MC') {
 				this.mc = this.mc.mc;
 			}
 
@@ -105,20 +114,18 @@ class MCEngine {
 			const JQ_CONTAINER = VDOM.draw.call(VDOM.component, stateObject, VDOM.normalized.props, VDOM);
 			this.mc.deleteKeyCurrentRenderingInstance(VDOM.component.uniquekey);
 			NEW_HTML = this.jqToHtml(JQ_CONTAINER) ?? new MC_Element().createEmptyElement();
-			NEW_HTML.instanceMC = VDOM.id;
-			NEW_HTML.instanceMCtype = 'mc_component';
+			VDOM.HTML = NEW_HTML;
+			VDOM.HTML.instanceMC = VDOM.id;
+			VDOM.HTML.instanceMCtype = 'mc_component';
 		} else {
 			const JQ_CONTAINER = VDOM.draw(this.getArrayValuesStates(VDOM));
 			NEW_HTML = this.jqToHtml(JQ_CONTAINER) ?? new MC_Element().createEmptyElement();
-			NEW_HTML.instanceMC = VDOM.id;
-			NEW_HTML.instanceMCtype = 'fn';
+			VDOM.HTML = NEW_HTML;
+			VDOM.HTML.instanceMC = VDOM.id;
+			VDOM.HTML.instanceMCtype = 'fn';
 		}
 
-		/**
-		 * Записываем id контейнера в атрибут нового html при ререндере. При переборе атрибутов MCDiff найдет, и вернет HTML в контейнер VDOM
-		 */
-		// NEW_HTML.setAttribute('mc_rnd_model_controlled', VDOM.id);
-		return NEW_HTML;
+		return VDOM.HTML;
 	}
 
 	render(state, mc, engine) {
@@ -128,10 +135,10 @@ class MCEngine {
 	}
 
 	/**
-	 * Контролируемый рендер для классового компонента 
+	 * Контролируемый рендер для классового компонента
 	 */
 	controlledRender(VDOM, type = 'mc_component') {
-		if(type === 'mc_component') {
+		if (type === 'mc_component') {
 			this.diffingComponent(VDOM);
 			return;
 		}
@@ -144,6 +151,10 @@ class MCEngine {
 	}
 
 	renderFunctionContainer(state, mc) {
+		if (mc.constructor.name !== 'MC') {
+			mc = mc.mc;
+		}
+
 		state.fcCollection.forEach((item) => {
 			const virtual = mc.fcCollection.get(item.effectKey);
 			const value = virtual.states.get(state.id);
@@ -156,7 +167,11 @@ class MCEngine {
 	}
 
 	renderComponentWork(state, mc) {
-		state.virtualCollection.forEach(item => {
+		if (mc.constructor.name !== 'MC') {
+			mc = mc.mc;
+		}
+
+		state.virtualCollection.forEach((item) => {
 			const virtual = mc.componentCollection.get(item.effectKey);
 			const value = virtual.states.get(state.id);
 
@@ -168,7 +183,11 @@ class MCEngine {
 	}
 
 	runEffectWork(state, mc) {
-		state.effectCollection.forEach(item => {
+		if (mc.constructor.name !== 'MC') {
+			mc = mc.mc;
+		}
+
+		state.effectCollection.forEach((item) => {
 			const effect = mc.effectCollection.get(item.effectKey);
 			const value = effect.states.get(state.id);
 

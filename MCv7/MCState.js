@@ -40,6 +40,11 @@ class MCState {
 	local;
 
 	/**
+	 * Свойство неверной привязки состояния
+	 */
+	incorrectStateBindError;
+
+	/**
 	 * Внутренние оптимизации
 	 */
 	_version = 0;
@@ -61,6 +66,8 @@ class MCState {
 
 		const { value, traceKey, id } = stateParam;
 		this.value = value;
+		this.guestState = false;
+		this.incorrectStateBindError = false;
 		this.traceKey = traceKey;
 		this.id = id;
 		this.virtualCollection = new Set();
@@ -102,7 +109,10 @@ class MCState {
 					// быстрый shallow check по === для элементов
 					let sameRefElements = true;
 					for (let i = 0; i < this.value.length; i++) {
-						if (this.value[i] !== newValue[i]) { sameRefElements = false; break; }
+						if (this.value[i] !== newValue[i]) {
+							sameRefElements = false;
+							break;
+						}
 					}
 					if (sameRefElements) fastEqual = true;
 				}
@@ -287,7 +297,10 @@ class MCState {
 			for (const ai of a) {
 				let found = false;
 				for (const bi of b) {
-					if (MCState.deepEqual(ai, bi)) { found = true; break; }
+					if (MCState.deepEqual(ai, bi)) {
+						found = true;
+						break;
+					}
 				}
 				if (!found) return false;
 			}
@@ -305,7 +318,8 @@ class MCState {
 			if (seen.has(x)) return seen.get(x) === y;
 			seen.set(x, y);
 
-			const isArrX = Array.isArray(x), isArrY = Array.isArray(y);
+			const isArrX = Array.isArray(x),
+				isArrY = Array.isArray(y);
 			if (isArrX !== isArrY) return false;
 			if (isArrX && isArrY) {
 				if (x.length !== y.length) return false;
