@@ -648,7 +648,6 @@ class MCEngine {
   }
 
   render(state, mc, engine) {
-    console.log("%RnD%");
     Boolean(state.fcCollection.size) &&
       engine.renderFunctionContainer(state, mc);
     Boolean(state.virtualCollection.size) &&
