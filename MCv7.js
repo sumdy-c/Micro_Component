@@ -723,7 +723,12 @@ class MCEngine {
 
       if (value !== state.value) {
         effect.states.set(state.id, state.value);
-        effect.run(this.getArrayValuesStates(effect), effect.options);
+        
+        const unmountCallFunction = effect.run(this.getArrayValuesStates(effect), effect.options);
+        
+        if(unmountCallFunction) {
+          effect.unmountCaller = unmountCallFunction;
+        }
       }
     });
   }
@@ -2247,17 +2252,23 @@ class MC {
           }
         }
 
-        const toDeleteEffect = [];
+        // v8 = Сейчас эффекты привязываются по инстансу рендера классового компонента, если он есть. 
+        // Для функциональных контейнеров функционал не предусмотрен
+        // Если эффекты будут знать value.parent для функционального контейнера - можно организовать привязку по ним.
+        // Но осторожно, нужно не повредить механизм определения детей и привязок для классов!
 
-        for (const [key, value] of this.effectCollection) {
-          if (value.parent === VDOM.key) {
-            toDeleteEffect.push(key);
-          }
-        }
+        // const toDeleteEffect = [];
+        // for (const [key, value] of this.effectCollection) {
+        //   if (value.parent === VDOM.key) {
+        //     value.unmountCaller();
+        //     toDeleteEffect.push(key);
+        //   }
+        // }
 
-        for (const key of toDeleteEffect) {
-          this.effectCollection.delete(key);
-        }
+        // for (const key of toDeleteEffect) {
+        //   this.effectCollection.delete(key);
+        // }
+        // continue - v8 ?
 
         this.fcCollection.delete(key);
       }
@@ -2269,14 +2280,12 @@ class MC {
   async checkAllDeadsClassComponentsContainers(batchSize = 100) {
     const deadKeys = [];
 
-    // 1. Собираем все мёртвые компоненты
     for (const [key, VDOM] of this.componentCollection) {
       if (!VDOM.HTML || !VDOM.HTML?.isConnected) {
         deadKeys.push(key);
       }
     }
 
-    // 2. Удаляем батчами (чтобы не блокировать главный поток)
     for (let i = 0; i < deadKeys.length; i += batchSize) {
       const batch = deadKeys.slice(i, i + batchSize);
 
@@ -2286,10 +2295,8 @@ class MC {
           continue;
         }
 
-        // Удаляем ссылки на компонент
         this.componentIdsCollection.delete(VDOM.id);
 
-        // Чистим связи состояний
         for (const [stateId] of VDOM.states) {
           const state = this.getStateID(stateId);
           if (!state) {
@@ -2312,6 +2319,7 @@ class MC {
 
         for (const [key, value] of this.effectCollection) {
           if (value.parent === VDOM.key) {
+            value.unmountCaller();
             toDeleteEffect.push(key);
           }
         }
@@ -2332,14 +2340,17 @@ class MC {
    * Создание сигнатуры эффекта
    */
   createSignatureEffect(virtualFn, id, iteratorKey) {
-    const key = this.generateComponentKey(virtualFn, iteratorKey);
+    const parentKey = this.getCurrentRenderingInstance();
+
+    const key = parentKey ? `${this.generateComponentKey(virtualFn, iteratorKey)}__${parentKey}` : this.generateComponentKey(virtualFn, iteratorKey);
 
     const virtualElement = {
       run: virtualFn,
-      key,
+      key: key,
       id,
       states: new Map(),
-      parent: this.getCurrentRenderingInstance(),
+      parent: parentKey ? parentKey : null,
+      unmountCaller: () => {}
     };
 
     this.effectCollection.set(key, virtualElement);
@@ -2372,13 +2383,25 @@ class MC {
       });
 
     if (!dependency.length) {
-      NativeVirtual.run(NativeVirtual.states.values());
+      const unmountCallFunction = NativeVirtual.run(NativeVirtual.states.values());
+
+      if(unmountCallFunction) {
+        NativeVirtual.unmountCaller = unmountCallFunction;
+      }
     }
   }
 
   getEffectVirtual(component, iteratorKey = "") {
     const key = this.generateComponentKey(component, iteratorKey);
-    const virtual = this.effectCollection.get(key);
+    const parentKey = this.getCurrentRenderingInstance();
+    
+    let virtual = null;
+    
+    virtual = this.effectCollection.get(key);
+    
+    if(!virtual) {
+      virtual = this.effectCollection.get(`${key}__${parentKey}`);
+    }
 
     if (virtual) {
       return true;
