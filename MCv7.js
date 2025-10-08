@@ -1,5 +1,3 @@
-// v7 -
-// Проблема с обновлении интерфейса
 class MCState {
   /**
    * id состояния
@@ -509,33 +507,33 @@ class MCEngine {
   }
 
   handlerRender(target, fn, path, state) {
-  	let tree = {};
+    let tree = {};
 
-  	if (!path) {
-  		path = 'obj';
-  	}
+    if (!path) {
+      path = "obj";
+    }
 
-  	const proxy = new Proxy(target, {
-  		get: (_, prop) => {
-  			if (typeof target[prop] != 'object') {
-  				return target[prop];
-  			}
-  			if (tree[prop] === undefined) {
-  				tree[prop] = this.handlerRender(target[prop], fn, `${path}.${prop}`);
-  			}
-  			return Reflect.get(...arguments);
-  		},
-  		set: (_, prop) => {
-  			try {
-  				fn(state, this.mc, this);
-  				return target[prop];
-  			} catch (error) {
-  				console.log(error);
-  			}
-  		},
-  	});
+    const proxy = new Proxy(target, {
+      get: (_, prop) => {
+        if (typeof target[prop] != "object") {
+          return target[prop];
+        }
+        if (tree[prop] === undefined) {
+          tree[prop] = this.handlerRender(target[prop], fn, `${path}.${prop}`);
+        }
+        return Reflect.get(...arguments);
+      },
+      set: (_, prop) => {
+        try {
+          fn(state, this.mc, this);
+          return target[prop];
+        } catch (error) {
+          console.log(error);
+        }
+      },
+    });
 
-  	return proxy;
+    return proxy;
   }
 
   jqToHtml(jqSelector) {
@@ -554,15 +552,13 @@ class MCEngine {
 
   // injection DOM
   diffing(VDOM) {
-    const JQ_CONTAINER = VDOM.draw(
-      this.getArrayValuesStates(VDOM),
-      VDOM.options
-    );
+    const JQ_CONTAINER = VDOM.draw(this.getArrayValuesStates(VDOM), VDOM.props);
     const NEW_HTML =
       this.jqToHtml(JQ_CONTAINER) ?? new MC_Element().createEmptyElement();
+
+    NEW_HTML.instanceMC = VDOM.id;
+    NEW_HTML.instanceMCtype = "fn";
     VDOM.HTML = this.diff.start(VDOM.HTML, NEW_HTML);
-    VDOM.HTML.instanceMC = VDOM.id;
-    VDOM.HTML.instanceMCtype = "fn";
   }
 
   /**
@@ -605,9 +601,10 @@ class MCEngine {
     this.mc.resetCurrentRenderingInstance();
     const NEW_HTML =
       this.jqToHtml(JQ_CONTAINER) ?? new MC_Element().createEmptyElement();
+
+    NEW_HTML.instanceMC = VDOM.id;
+    NEW_HTML.instanceMCtype = "mc_component";
     VDOM.HTML = this.diff.start(VDOM.HTML, NEW_HTML);
-    VDOM.HTML.instanceMC = VDOM.id;
-    VDOM.HTML.instanceMCtype = "mc_component";
   }
 
   /**
@@ -632,27 +629,39 @@ class MCEngine {
       this.mc.deleteKeyCurrentRenderingInstance(VDOM.component.uniquekey);
       NEW_HTML =
         this.jqToHtml(JQ_CONTAINER) ?? new MC_Element().createEmptyElement();
+      NEW_HTML.instanceMC = VDOM.id;
+      NEW_HTML.instanceMCtype = "mc_component";
       VDOM.HTML = NEW_HTML;
-      VDOM.HTML.instanceMC = VDOM.id;
-      VDOM.HTML.instanceMCtype = "mc_component";
     } else {
-      const JQ_CONTAINER = VDOM.draw(this.getArrayValuesStates(VDOM));
+      const JQ_CONTAINER = VDOM.draw(
+        this.getArrayValuesStates(VDOM),
+        VDOM.props
+      );
       NEW_HTML =
         this.jqToHtml(JQ_CONTAINER) ?? new MC_Element().createEmptyElement();
+
+      NEW_HTML.instanceMC = VDOM.id;
+      NEW_HTML.instanceMCtype = "fn";
       VDOM.HTML = NEW_HTML;
-      VDOM.HTML.instanceMC = VDOM.id;
-      VDOM.HTML.instanceMCtype = "fn";
     }
 
     return VDOM.HTML;
   }
 
   render(state, mc, engine) {
-    Boolean(state.fcCollection.size) &&
-      engine.renderFunctionContainer(state, mc);
-    Boolean(state.virtualCollection.size) &&
-      engine.renderComponentWork(state, mc);
-    Boolean(state.effectCollection.size) && engine.runEffectWork(state, mc);
+    const hasFC = Boolean(state.fcCollection.size);
+    const hasVC = Boolean(state.virtualCollection.size);
+    const hasFX = Boolean(state.effectCollection.size);
+
+    if (hasFC) engine.renderFunctionContainer(state, mc);
+    if (hasVC) engine.renderComponentWork(state, mc);
+    if (hasFX) engine.runEffectWork(state, mc);
+
+    // 🔹 Планируем очистку мёртвых контейнеров (без блокировки рендера)
+    if (mc.constructor.name !== "MC") {
+      mc = mc.mc; // если вызов из дочернего контекста
+    }
+    mc.scheduleCleanDeadVDOM();
   }
 
   /**
@@ -968,12 +977,64 @@ class MasterDiff {
    */
   serviceDiff;
 
-  constructor(attrDiff, styleDiff, classDiff, eventDiff) {
+  /**
+   * MC
+   */
+  mc;
+
+  constructor(attrDiff, styleDiff, classDiff, eventDiff, mc) {
     this.attrDiff = attrDiff;
     this.styleDiff = styleDiff;
     this.classDiff = classDiff;
     this.eventDiff = eventDiff;
+    this.mc = mc;
   }
+
+  cleanupVDOM(oldNode, newNode) {
+    if (this.mc.constructor.name !== "MC") {
+      this.mc = this.mc.mc;
+    }
+
+    if (oldNode.instanceMCtype === "fn") {
+      const key = oldNode.instanceMC;
+      const vdom = this.mc.fcCollection.get(this.mc.fcIdsCollection.get(key));
+
+      if (vdom) {
+        vdom.HTML = null;
+      }
+
+      if (newNode.instanceMCtype === "fn" && newNode.instanceMC) {
+        oldNode.instanceMC = newNode.instanceMC;
+      }
+
+      if (!newNode.instanceMC) {
+        oldNode.instanceMC = undefined;
+      }
+
+      return;
+    }
+
+    if (oldNode.instanceMCtype === "mc_component") {
+      const key = oldNode.instanceMC;
+
+      const vdom = this.mc.componentCollection.get(
+        this.mc.componentIdsCollection.get(key)
+      );
+
+      if (vdom) {
+        vdom.HTML = null;
+      }
+
+      if (newNode.instanceMCtype === "mc_component" && newNode.instanceMC) {
+        oldNode.instanceMC = newNode.instanceMC;
+      }
+
+      if (!newNode.instanceMC) {
+        oldNode.instanceMC = undefined;
+      }
+    }
+  }
+
   /**
    * Основная функция сравнения двух узлов
    * Возвращает структуру патча ("trace"), содержащую необходимые операции для применения изменений.
@@ -986,11 +1047,27 @@ class MasterDiff {
       return { type: "ADD", node: newNode, ctx: context };
     }
     if (oldNode && !newNode) {
-      // а если у тебя <mc> пустой тэг ссылка - оно надо ?
       return { type: "REMOVE", ctx: context };
     }
     if (!oldNode && !newNode) {
       return { type: "NONE", ctx: context };
+    }
+
+    if (
+      oldNode.instanceMC &&
+      newNode.instanceMC &&
+      oldNode.instanceMC !== newNode.instanceMC
+    ) {
+      this.cleanupVDOM(oldNode, newNode);
+    }
+
+    if (oldNode.instanceMC && !newNode.instanceMC) {
+      this.cleanupVDOM(oldNode, newNode);
+    }
+
+    if (!oldNode.instanceMC && newNode.instanceMC) {
+      oldNode.instanceMC = newNode.instanceMC;
+      oldNode.instanceMCtype = newNode.instanceMCtype;
     }
 
     // === Типы узлов ===
@@ -1243,6 +1320,7 @@ class PatchMaster {
         this.eventDiff.applyEvents(patch.eventPatch, domNode);
         // Дети
         this.applyPatch(patch.childrenPatch, domNode, context);
+
         this.reconnectingVDOM(domNode);
         return domNode;
       case "CHILDREN":
@@ -1306,11 +1384,6 @@ class MCDiff {
    */
   patch;
 
-  /**
-   * desc
-   */
-  mc;
-
   constructor(mc) {
     const serviceDiff = new ServiceDiff();
     const attrDiff = new AttrDiff(serviceDiff, mc);
@@ -1318,65 +1391,8 @@ class MCDiff {
     const classDiff = new ClassDiff(serviceDiff);
     const eventDiff = new EventDiff();
 
-    this.master = new MasterDiff(attrDiff, styleDiff, classDiff, eventDiff);
+    this.master = new MasterDiff(attrDiff, styleDiff, classDiff, eventDiff, mc);
     this.patch = new PatchMaster(attrDiff, styleDiff, classDiff, eventDiff, mc);
-    this.mc = mc;
-  }
-
-  reconnectingVDOM(rootNode) {
-    const processEl = (el) => {
-      if (!el.instanceMC) {
-        return;
-      }
-
-      if (el.instanceMCtype === "fn") {
-        const key = el.instanceMC;
-        const vdom = this.mc.fcCollection.get(this.mc.fcIdsCollection.get(key));
-
-        if (vdom) {
-          vdom.HTML = el;
-        }
-      }
-
-      if (el.instanceMCtype === "mc_component") {
-        const key = el.instanceMC;
-
-        if (this.mc.constructor.name !== "MC") {
-          this.mc = this.mc.mc;
-        }
-
-        const vdom = this.mc.componentCollection.get(
-          this.mc.componentIdsCollection.get(key)
-        );
-
-        if (vdom) {
-          vdom.HTML = el;
-        }
-      }
-    };
-
-    if (rootNode.nodeType === 1 && rootNode.instanceMC) {
-      processEl(rootNode);
-    }
-
-    const walker = document.createTreeWalker(
-      rootNode,
-      NodeFilter.SHOW_ELEMENT,
-      {
-        acceptNode(node) {
-          return node.instanceMC
-            ? NodeFilter.FILTER_ACCEPT
-            : NodeFilter.FILTER_SKIP;
-        },
-      },
-      false
-    );
-
-    let node = walker.nextNode();
-    while (node) {
-      processEl(node);
-      node = walker.nextNode();
-    }
   }
 
   start(oldNode, newNode) {
@@ -1565,6 +1581,11 @@ class MC {
   mc_context_global;
 
   /**
+   * Свойство планировщика очистки
+   */
+  _cleaningScheduled;
+
+  /**
    * Коллекция контейнеров
    */
   fcCollection;
@@ -1622,7 +1643,10 @@ class MC {
     // константы для счетчиков очистки
     this.COUNTER_CLEAR = 150;
 
-    // Счетчик до проверки, для функциональных контейнеров
+    /**
+     * @deprecated - нужна переработка
+     * Счетчик до проверки, для функциональных контейнеров
+     */
     this.checkCountClearedFunctionContainers = this.COUNTER_CLEAR;
 
     /**
@@ -1634,6 +1658,11 @@ class MC {
      * Глобальные хранилища контекстов
      */
     this.mc_context_global = new Set();
+
+    /**
+     * Свойство планировщика очистки
+     */
+    this._cleaningScheduled = false;
 
     if (window.$) {
       this.original$ = window.$;
@@ -1708,6 +1737,29 @@ class MC {
 
     // Активация DF
     // MC.enableFragmentShortSyntax();
+  }
+
+  scheduleCleanDeadVDOM() {
+    if (this._cleaningScheduled) {
+      return;
+    }
+
+    this._cleaningScheduled = true;
+
+    const run = async () => {
+      try {
+        await this.checkAllDeadsFunctionsContainers();
+        await this.checkAllDeadsClassComponentsContainers();
+      } finally {
+        this._cleaningScheduled = false;
+      }
+    };
+
+    if ("requestIdleCallback" in window) {
+      requestIdleCallback(run, { timeout: 500 });
+    } else {
+      setTimeout(run, 200);
+    }
   }
 
   static enableFragmentShortSyntax() {
@@ -2011,12 +2063,12 @@ class MC {
    * Проверка типа сущности
    */
   checkTypeEntity(component) {
-    if (!component.prototype) {
-      return "function";
-    }
-
     if (component.prototype instanceof MC) {
       return "mc_component";
+    }
+
+    if (component.constructor.name === "Function") {
+      return "function";
     }
 
     this.log.error("Ошибка определения компонента", [
@@ -2027,30 +2079,30 @@ class MC {
     return "error";
   }
 
-  processFunction(component, param, iteratorKey, instruction) {
+  processFunction(args) {
+    const { component, instruction, key, props, states } =
+      this.normilizeArgs(args);
+
     if (instruction === "effect") {
-      if (this.getEffectVirtual(component, iteratorKey)) {
+      if (this.getEffectVirtual(component, key)) {
         return;
       }
 
-      this.createEffect(component, param, iteratorKey);
+      this.createEffect(component, states, key);
       return null;
     }
 
-    const virtual = this.getFunctionContainerVirtual(component, iteratorKey);
+    const virtual = this.getFunctionContainerVirtual(component, key);
 
     if (!virtual) {
-      return this.createFunctionContainer(component, param, iteratorKey);
+      return this.createFunctionContainer(component, props, states, key);
     }
 
     if (!virtual.HTML.isConnected) {
-      this.removeDeadFunctionContainer(virtual, param);
-      return this.createFunctionContainer(component, param, iteratorKey);
+      return this.createFunctionContainer(component, props, states, key);
     }
 
-    // сборка мертвых контейнеров
-    // this.checkAllDeadsFunctionsContainers();
-
+    virtual.props = props; // Обновление реквизита для функционального контейнера
     return this.workFunctionContainer(virtual, instruction === "memo");
   }
 
@@ -2082,11 +2134,12 @@ class MC {
   /**
    * Создание сигнатуры для контейнера
    */
-  createSignatureFunctionContainer(virtualFn, id, iteratorKey) {
+  createSignatureFunctionContainer(virtualFn, props, id, iteratorKey) {
     const key = this.generateComponentKey(virtualFn, iteratorKey);
 
     const virtualElement = {
       draw: virtualFn,
+      props,
       key,
       id,
       states: new Map(),
@@ -2102,10 +2155,11 @@ class MC {
   /**
    * Создание контейнера
    */
-  createFunctionContainer(component, dependency, iteratorKey = "") {
+  createFunctionContainer(component, props, dependency, iteratorKey = "") {
     const id = this.uuidv4();
     const NativeVirtual = this.createSignatureFunctionContainer(
       component,
+      props,
       id,
       iteratorKey
     );
@@ -2122,14 +2176,7 @@ class MC {
         }
       });
 
-    if (dependency && dependency.length) {
-      const [firstState] = dependency;
-      NativeVirtual.states.set(
-        firstState.id,
-        `reset_state_initial_${this.uuidv4()}`
-      );
-      firstState.initial();
-    } else {
+    if (!dependency && !dependency.length) {
       this.log.error("Ошибка чтения массива состояний", [
         `Структура функционального контейнера:`,
         `${NativeVirtual.draw}`,
@@ -2137,6 +2184,8 @@ class MC {
         "Если вам не нужны зависимости в данном компоненте, скорее всего вы нецелесообразно используете функциональные контейнеры.",
       ]);
     }
+
+    NativeVirtual.HTML = this.engine.rerender(NativeVirtual);
     NativeVirtual.HTML.instanceMC = NativeVirtual.id;
     NativeVirtual.HTML.instanceMCtype = "fn";
 
@@ -2165,75 +2214,118 @@ class MC {
     return false;
   }
 
-  /**
-   * Удаление мёртвых функциональных контейнеров
-   */
-  removeDeadFunctionContainer(virtual, dependency) {
-    this.fcCollection.delete(virtual.key);
-    this.fcIdsCollection.delete(virtual.id);
+  async checkAllDeadsFunctionsContainers(batchSize = 100) {
+    const deadKeys = [];
 
-    if (dependency) {
-      for (const state of dependency) {
-        for (const entry of state.fcCollection) {
-          if (entry.effectKey === virtual.key) {
-            state.fcCollection.delete(entry);
-            break;
-          }
-        }
+    for (const [key, VDOM] of this.fcCollection) {
+      if (!VDOM.HTML || !VDOM.HTML.isConnected) {
+        deadKeys.push(key);
       }
     }
-  }
 
-  /**
-   * Удаление мёртвых классовых компонентов
-   */
-  removeDeadComponent(virtual, dependency) {
-    this.componentCollection.delete(virtual.key);
-    this.componentIdsCollection.delete(virtual.key);
-
-    if (dependency) {
-      for (const state of dependency) {
-        for (const entry of state.componentCollection) {
-          if (entry.effectKey === virtual.key) {
-            state.componentCollection.delete(entry);
-            break;
-          }
+    for (let i = 0; i < deadKeys.length; i += batchSize) {
+      const batch = deadKeys.slice(i, i + batchSize);
+      for (const key of batch) {
+        const VDOM = this.fcCollection.get(key);
+        if (!VDOM) {
+          continue;
         }
-      }
-    }
-  }
 
-  async checkAllDeadsFunctionsContainers() {
-    if (this.checkCountClearedFunctionContainers) {
-      --this.checkCountClearedFunctionContainers;
-      return;
-    }
+        this.fcIdsCollection.delete(VDOM.id);
 
-    new Promise(() => {
-      for (const VDOM_Object of this.fcCollection) {
-        const [key, VDOM] = VDOM_Object;
+        for (const [stateId] of VDOM.states) {
+          const state = this.getStateID(stateId);
+          if (!state) {
+            continue;
+          }
 
-        if (!VDOM.HTML.isConnected) {
-          this.fcIdsCollection.delete(VDOM.id);
-
-          for (const state_Object of VDOM.states) {
-            const state = this.getStateID(state_Object[0]);
-
-            for (const entry of state.fcCollection) {
-              if (entry.effectKey === key) {
-                state.fcCollection.delete(entry);
-                break;
-              }
+          for (const entry of state.fcCollection) {
+            if (entry.effectKey === key) {
+              state.fcCollection.delete(entry);
+              break;
             }
           }
-
-          this.fcCollection.delete(key);
         }
-      }
-    });
 
-    this.checkCountClearedFunctionContainers =
-      this.COUNTER_CLEAR + this.fcCollection.size;
+        const toDeleteEffect = [];
+
+        for (const [key, value] of this.effectCollection) {
+          if (value.parent === VDOM.key) {
+            toDeleteEffect.push(key);
+          }
+        }
+
+        for (const key of toDeleteEffect) {
+          this.effectCollection.delete(key);
+        }
+
+        this.fcCollection.delete(key);
+      }
+
+      await new Promise((r) => setTimeout(r, 0));
+    }
+  }
+
+  async checkAllDeadsClassComponentsContainers(batchSize = 100) {
+    const deadKeys = [];
+
+    // 1. Собираем все мёртвые компоненты
+    for (const [key, VDOM] of this.componentCollection) {
+      if (!VDOM.HTML || !VDOM.HTML?.isConnected) {
+        deadKeys.push(key);
+      }
+    }
+
+    // 2. Удаляем батчами (чтобы не блокировать главный поток)
+    for (let i = 0; i < deadKeys.length; i += batchSize) {
+      const batch = deadKeys.slice(i, i + batchSize);
+
+      for (const key of batch) {
+        const VDOM = this.componentCollection.get(key);
+        if (!VDOM) {
+          continue;
+        }
+
+        // Удаляем ссылки на компонент
+        this.componentIdsCollection.delete(VDOM.id);
+
+        // Чистим связи состояний
+        for (const [stateId] of VDOM.states) {
+          const state = this.getStateID(stateId);
+          if (!state) {
+            continue;
+          }
+
+          for (const entry of state.virtualCollection) {
+            if (entry.effectKey === key) {
+              state.virtualCollection.delete(entry);
+
+              if (state.local && !state.virtualCollection.length) {
+                this.mc_state_global.delete(state);
+              }
+              break;
+            }
+          }
+        }
+
+        const toDeleteEffect = [];
+
+        for (const [key, value] of this.effectCollection) {
+          if (value.parent === VDOM.key) {
+            toDeleteEffect.push(key);
+          }
+        }
+
+        for (const key of toDeleteEffect) {
+          this.effectCollection.delete(key);
+        }
+
+        this.componentCollection.delete(key);
+      }
+
+      // Освободим поток (асинхронная пауза)
+      await new Promise((r) => setTimeout(r, 0));
+    }
   }
 
   /**
@@ -2247,6 +2339,7 @@ class MC {
       key,
       id,
       states: new Map(),
+      parent: this.getCurrentRenderingInstance(),
     };
 
     this.effectCollection.set(key, virtualElement);
@@ -2268,7 +2361,6 @@ class MC {
 
     dependency &&
       dependency.map((state) => {
-        // Перед выпуском, рассмотри тут instanceof
         if (this.isStateLike(state)) {
           state.effectCollection.add({ effectKey: NativeVirtual.key });
           NativeVirtual.states.set(state.id, state.value);
@@ -2363,10 +2455,14 @@ class MC {
       states: [],
       key: undefined,
       context: null,
+      instruction: null,
     };
 
     for (const arg of args) {
-      if (arg && arg.prototype instanceof MC) {
+      if (
+        (arg && arg.prototype instanceof MC) ||
+        (arg && arg.constructor.name === "Function")
+      ) {
         normalized.component = arg;
         continue;
       }
@@ -2410,6 +2506,11 @@ class MC {
         continue;
       }
 
+      if (arg === "effect" || arg === "memo") {
+        normalized.instruction = arg;
+        continue;
+      }
+
       if (typeof arg === "string" || typeof arg === "number") {
         normalized.key = arg;
         continue;
@@ -2446,8 +2547,6 @@ class MC {
       : this.generateKeyFromNormalized(normalized);
     normalized.key = normalized.uniquekey;
 
-    const id = this.uuidv4();
-
     const rndInstance = this.getCurrentRenderingInstance();
 
     const uniqueKey = rndInstance
@@ -2463,6 +2562,8 @@ class MC {
       return this.engine.rerender(virtual, "mc_component");
     }
 
+    const id = this.uuidv4();
+
     // Создание нового компонента
     return this.componentHandler.register(normalized, id);
   }
@@ -2471,17 +2572,12 @@ class MC {
    * Начало обработки MC
    */
   use() {
-    const [component, param, iteratorKey, instruction] = arguments;
+    const [component] = arguments;
     const typeEntity = this.mc.checkTypeEntity(component);
 
     switch (typeEntity) {
       case "function": {
-        return this.mc.processFunction(
-          component,
-          param,
-          iteratorKey,
-          instruction
-        );
+        return this.mc.processFunction(arguments);
       }
       case "mc_component": {
         return this.mc.processComponent(arguments);
