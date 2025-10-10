@@ -25,12 +25,6 @@ Then include it:
 <script src="node_modules/jquery-micro_component/MC.min.js"></script>
 ```
 
-### CDN
-```html
-<script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/jquery-micro_component@0.7.0/MC.min.js"></script>
-```
-
 ### Manual
 Download `MC.min.js` and include it manually after jQuery.
 
