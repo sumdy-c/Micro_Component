@@ -63,16 +63,16 @@ Download `MC.min.js` and include it manually after jQuery.
 ### Functional Component Style
 ```js
 
-function Counter(props) {
-  const [count, setCount] = MC.uState(props.initial || 0);
+function Counter(_s, { initial }) {
+  const countState = MC.uState(initial || 0);
   
   return $('<div>').append(
-    $('<button>').text('+').on('click', () => setCount(count + 1)),
-    $('<span>').text(` Count: ${count}`)
+    $('<button>').text('+').on('click', () => countState.set(count + 1)),
+    $('<span>').text(` Count: ${countState.get()}`)
   );
 }
 
-MC.use(Counter, MC.Props({ props: { initial: 0 } }), '#app');
+$.MC(Counter, { initial: 0 });
 ```
 
 ### Class-based Component Style
