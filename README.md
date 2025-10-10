@@ -1,6 +1,6 @@
 # MC (Micro Component)
 
-MC (Micro Component) is a lightweight JavaScript library that **enhances jQuery with seamless reactivity**. It lets you write modular components and reactive UI logic in legacy jQuery apps, simplifying development of dynamic, interactive features. At just a few kilobytes, MC introduces a component/hook-style API (similar to modern frameworks) without extra dependencies. This makes it easy to **incrementally add reactivity** to existing jQuery-based projects.
+MC (Micro Component) is a JavaScript framework plugin library that extends jQuery by providing seamless reactivity. It enables the creation of modular components and reactive UI logic in legacy jQuery applications, simplifying the development of dynamic, interactive features. MC offers a component/hook-style API (similar to modern frameworks) without additional dependencies. This makes it easy to gradually add reactivity to existing jQuery-based projects.
 
 ## Docs: 
 see the <a href ='https://sumdy-c.github.io/MC_Documentation/'>documentation</a> for a full understanding of the installation!
