@@ -1,3 +1,4 @@
+//TODO v8 = batched render / microtask queue;
 class MCState {
   /**
    * id состояния
@@ -657,10 +658,11 @@ class MCEngine {
     if (hasVC) engine.renderComponentWork(state, mc);
     if (hasFX) engine.runEffectWork(state, mc);
 
-    // 🔹 Планируем очистку мёртвых контейнеров (без блокировки рендера)
+    // Планируем очистку мёртвых контейнеров (без блокировки рендера)
     if (mc.constructor.name !== "MC") {
       mc = mc.mc; // если вызов из дочернего контекста
     }
+
     mc.scheduleCleanDeadVDOM();
   }
 
@@ -723,10 +725,13 @@ class MCEngine {
 
       if (value !== state.value) {
         effect.states.set(state.id, state.value);
-        
-        const unmountCallFunction = effect.run(this.getArrayValuesStates(effect), effect.options);
-        
-        if(unmountCallFunction) {
+
+        const unmountCallFunction = effect.run(
+          this.getArrayValuesStates(effect),
+          effect.options
+        );
+
+        if (unmountCallFunction) {
           effect.unmountCaller = unmountCallFunction;
         }
       }
@@ -2252,7 +2257,7 @@ class MC {
           }
         }
 
-        // v8 = Сейчас эффекты привязываются по инстансу рендера классового компонента, если он есть. 
+        // v8 = Сейчас эффекты привязываются по инстансу рендера классового компонента, если он есть.
         // Для функциональных контейнеров функционал не предусмотрен
         // Если эффекты будут знать value.parent для функционального контейнера - можно организовать привязку по ним.
         // Но осторожно, нужно не повредить механизм определения детей и привязок для классов!
@@ -2342,7 +2347,9 @@ class MC {
   createSignatureEffect(virtualFn, id, iteratorKey) {
     const parentKey = this.getCurrentRenderingInstance();
 
-    const key = parentKey ? `${this.generateComponentKey(virtualFn, iteratorKey)}__${parentKey}` : this.generateComponentKey(virtualFn, iteratorKey);
+    const key = parentKey
+      ? `${this.generateComponentKey(virtualFn, iteratorKey)}__${parentKey}`
+      : this.generateComponentKey(virtualFn, iteratorKey);
 
     const virtualElement = {
       run: virtualFn,
@@ -2350,7 +2357,7 @@ class MC {
       id,
       states: new Map(),
       parent: parentKey ? parentKey : null,
-      unmountCaller: () => {}
+      unmountCaller: () => {},
     };
 
     this.effectCollection.set(key, virtualElement);
@@ -2383,9 +2390,11 @@ class MC {
       });
 
     if (!dependency.length) {
-      const unmountCallFunction = NativeVirtual.run(NativeVirtual.states.values());
+      const unmountCallFunction = NativeVirtual.run(
+        NativeVirtual.states.values()
+      );
 
-      if(unmountCallFunction) {
+      if (unmountCallFunction) {
         NativeVirtual.unmountCaller = unmountCallFunction;
       }
     }
@@ -2394,12 +2403,12 @@ class MC {
   getEffectVirtual(component, iteratorKey = "") {
     const key = this.generateComponentKey(component, iteratorKey);
     const parentKey = this.getCurrentRenderingInstance();
-    
+
     let virtual = null;
-    
+
     virtual = this.effectCollection.get(key);
-    
-    if(!virtual) {
+
+    if (!virtual) {
       virtual = this.effectCollection.get(`${key}__${parentKey}`);
     }
 
@@ -2445,16 +2454,84 @@ class MC {
       parts.push(normalized.component.name || normalized.component.toString());
     }
 
+    const typeSignature = (value) => {
+      const seen = new WeakSet();
+
+      const sig = (v) => {
+        if (v === null) return "null";
+        if (v === undefined) return "undefined";
+
+        const t = typeof v;
+        if (t === "string") return "string";
+        if (t === "number") return Number.isNaN(v) ? "nan" : "number";
+        if (t === "boolean") return "boolean";
+        if (t === "function") return "function";
+        if (t === "symbol") return "symbol";
+        if (t === "bigint") return "bigint";
+
+        // объекты сложнее
+        if (v instanceof Date) return "Date";
+        if (v instanceof RegExp) return "RegExp";
+        if (v instanceof Map) {
+          // типы ключей/значений в Map
+          const keyTypes = [];
+          const valTypes = [];
+          for (const [k, val] of v.entries()) {
+            keyTypes.push(sig(k));
+            valTypes.push(sig(val));
+          }
+          return `Map<${uniqueSorted(keyTypes).join(",")}|${uniqueSorted(
+            valTypes
+          ).join(",")}>`;
+        }
+        if (v instanceof Set) {
+          const elTypes = [];
+          for (const el of v.values()) elTypes.push(sig(el));
+          return `Set<${uniqueSorted(elTypes).join(",")}>`;
+        }
+        if (Array.isArray(v)) {
+          if (seen.has(v)) return "Array<...>"; // защита от циклов
+          seen.add(v);
+          const elemTypes = v.map(sig);
+          return `Array<${uniqueSorted(elemTypes).join(",")}>`;
+        }
+        // Plain object
+        if (t === "object") {
+          if (seen.has(v)) return "Object<...>"; // защита от циклов
+          seen.add(v);
+          const keys = Object.keys(v).sort();
+          // Для каждого ключа берем подпись типа значения — сохраняем имена ключей,
+          // потому что обычно они значимы для props. (Если нужно игнорировать имена —
+          // можно заменить на uniqueSorted(types) ).
+          const pairs = keys.map((k) => `${k}:${sig(v[k])}`);
+          return `{${pairs.join(",")}}`;
+        }
+
+        // fallback
+        return t;
+      };
+
+      // helper: уникализировать и отсортировать набор типов (для порядка)
+      const uniqueSorted = (arr) => Array.from(new Set(arr)).sort();
+
+      return sig(value);
+    };
+
     if (normalized.props && Object.keys(normalized.props).length > 0) {
-      parts.push(this.serializeForHash(normalized.props));
+      parts.push(typeSignature(normalized.props));
     }
 
     if (normalized.states && normalized.states.length > 0) {
-      parts.push(this.serializeForHash(normalized.states.map((s) => s.value)));
+      // states — массив объектов { value, ... } — учитываем ТОЛЬКО типы value
+      parts.push(
+        "[" +
+          normalized.states.map((s) => typeSignature(s && s.value)).join("|") +
+          "]"
+      );
     }
 
     if (normalized.context) {
-      parts.push(this.serializeForHash(normalized.context));
+      parts.push(typeSignature(normalized.context));
     }
 
     return this.hashString(parts.join("|"));
@@ -2469,7 +2546,6 @@ class MC {
     );
   }
 
-  // нормалайзер: НЕ вынимаем state из props.
   // Но всё же приводим props к простой форме: сортировка ключей и shallow-копия.
   normilizeArgs(args) {
     const normalized = {

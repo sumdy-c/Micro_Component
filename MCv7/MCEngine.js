@@ -1,210 +1,254 @@
 class MCEngine {
-	mc;
+  mc;
 
-	constructor(mc) {
-		this.mc = mc;
-		this.diff = new MCDiff(this.mc);
-	}
+  constructor(mc) {
+    this.mc = mc;
+    this.diff = new MCDiff(this.mc);
+  }
 
-	handlerRender(target, fn, path, state) {
-		let tree = {};
+  handlerRender(target, fn, path, state) {
+    let tree = {};
 
-		if (!path) {
-			path = 'obj';
-		}
+    if (!path) {
+      path = "obj";
+    }
 
-		const proxy = new Proxy(target, {
-			get: (_, prop) => {
-				if (typeof target[prop] != 'object') {
-					return target[prop];
-				}
-				if (tree[prop] === undefined) {
-					tree[prop] = this.handlerRender(target[prop], fn, `${path}.${prop}`);
-				}
-				return Reflect.get(...arguments);
-			},
-			set: (_, prop) => {
-				try {
-					fn(state, this.mc, this);
-					return target[prop];
-				} catch (error) {
-					console.log(error);
-				}
-			},
-		});
+    const proxy = new Proxy(target, {
+      get: (_, prop) => {
+        if (typeof target[prop] != "object") {
+          return target[prop];
+        }
+        if (tree[prop] === undefined) {
+          tree[prop] = this.handlerRender(target[prop], fn, `${path}.${prop}`);
+        }
+        return Reflect.get(...arguments);
+      },
+      set: (_, prop) => {
+        try {
+          fn(state, this.mc, this);
+          return target[prop];
+        } catch (error) {
+          console.log(error);
+        }
+      },
+    });
 
-		return proxy;
-	}
+    return proxy;
+  }
 
-	jqToHtml(jqSelector) {
-		if (!jqSelector) {
-			return null;
-		}
+  jqToHtml(jqSelector) {
+    if (!jqSelector) {
+      return null;
+    }
 
-		const [html] = jqSelector;
+    const [html] = jqSelector;
 
-		if (!html) {
-			return null;
-		}
+    if (!html) {
+      return null;
+    }
 
-		return html;
-	}
+    return html;
+  }
 
-	// injection DOM
-	diffing(VDOM) {
-		const JQ_CONTAINER = VDOM.draw(this.getArrayValuesStates(VDOM), VDOM.options);
-		const NEW_HTML = this.jqToHtml(JQ_CONTAINER) ?? new MC_Element().createEmptyElement();
-		VDOM.HTML = this.diff.start(VDOM.HTML, NEW_HTML);
-		VDOM.HTML.instanceMC = VDOM.id;
-		VDOM.HTML.instanceMCtype = 'fn';
-	}
+  // injection DOM
+  diffing(VDOM) {
+    const JQ_CONTAINER = VDOM.draw(this.getArrayValuesStates(VDOM), VDOM.props);
+    const NEW_HTML =
+      this.jqToHtml(JQ_CONTAINER) ?? new MC_Element().createEmptyElement();
 
-	/**
-	 * Формирование состояния реквизита
-	 */
-	formationStates(VDOM) {
-		const stateObject = {
-			global: [],
-			local: [],
-		};
+    NEW_HTML.instanceMC = VDOM.id;
+    NEW_HTML.instanceMCtype = "fn";
+    VDOM.HTML = this.diff.start(VDOM.HTML, NEW_HTML);
+  }
 
-		for (const state of VDOM.normalized.states) {
-			if (state.incorrectStateBindError) {
-				continue;
-			}
+  /**
+   * Формирование состояния реквизита
+   */
+  formationStates(VDOM) {
+    const stateObject = {
+      global: [],
+      local: [],
+    };
 
-			if (state.local) {
-				stateObject.local.push(state.get());
-			} else {
-				stateObject.global.push(state.get());
-			}
-		}
+    for (const state of VDOM.normalized.states) {
+      if (state.incorrectStateBindError) {
+        continue;
+      }
 
-		return stateObject;
-	}
+      if (state.local) {
+        stateObject.local.push(state.get());
+      } else {
+        stateObject.global.push(state.get());
+      }
+    }
 
-	diffingComponent(VDOM) {
-		if (this.mc.constructor.name !== 'MC') {
-			this.mc = this.mc.mc;
-		}
+    return stateObject;
+  }
 
-		this.mc.setCurrentRenderingInstance(VDOM.key);
-		const stateObject = this.formationStates(VDOM);
-		const JQ_CONTAINER = VDOM.draw.call(VDOM.component, stateObject, VDOM.normalized.props, VDOM);
-		this.mc.resetCurrentRenderingInstance();
-		const NEW_HTML = this.jqToHtml(JQ_CONTAINER) ?? new MC_Element().createEmptyElement();
-		VDOM.HTML = this.diff.start(VDOM.HTML, NEW_HTML);
-		VDOM.HTML.instanceMC = VDOM.id;
-		VDOM.HTML.instanceMCtype = 'mc_component';
-	}
+  diffingComponent(VDOM) {
+    if (this.mc.constructor.name !== "MC") {
+      this.mc = this.mc.mc;
+    }
 
-	/**
-	 * Обновить ссылку на компонент для дочернего VDOM
-	 */
-	rerender(VDOM, type = 'fn') {
-		let NEW_HTML = null;
+    this.mc.setCurrentRenderingInstance(VDOM.key);
+    const stateObject = this.formationStates(VDOM);
+    const JQ_CONTAINER = VDOM.draw.call(
+      VDOM.component,
+      stateObject,
+      VDOM.normalized.props,
+      VDOM
+    );
+    this.mc.resetCurrentRenderingInstance();
+    const NEW_HTML =
+      this.jqToHtml(JQ_CONTAINER) ?? new MC_Element().createEmptyElement();
 
-		if (type === 'mc_component') {
-			if (this.mc.constructor.name !== 'MC') {
-				this.mc = this.mc.mc;
-			}
+    NEW_HTML.instanceMC = VDOM.id;
+    NEW_HTML.instanceMCtype = "mc_component";
+    VDOM.HTML = this.diff.start(VDOM.HTML, NEW_HTML);
+  }
 
-			this.mc.setCurrentRenderingInstance(VDOM.component.uniquekey);
-			const stateObject = this.formationStates(VDOM);
-			const JQ_CONTAINER = VDOM.draw.call(VDOM.component, stateObject, VDOM.normalized.props, VDOM);
-			this.mc.deleteKeyCurrentRenderingInstance(VDOM.component.uniquekey);
-			NEW_HTML = this.jqToHtml(JQ_CONTAINER) ?? new MC_Element().createEmptyElement();
-			VDOM.HTML = NEW_HTML;
-			VDOM.HTML.instanceMC = VDOM.id;
-			VDOM.HTML.instanceMCtype = 'mc_component';
-		} else {
-			const JQ_CONTAINER = VDOM.draw(this.getArrayValuesStates(VDOM));
-			NEW_HTML = this.jqToHtml(JQ_CONTAINER) ?? new MC_Element().createEmptyElement();
-			VDOM.HTML = NEW_HTML;
-			VDOM.HTML.instanceMC = VDOM.id;
-			VDOM.HTML.instanceMCtype = 'fn';
-		}
+  /**
+   * Обновить ссылку на компонент для дочернего VDOM
+   */
+  rerender(VDOM, type = "fn") {
+    let NEW_HTML = null;
 
-		return VDOM.HTML;
-	}
+    if (type === "mc_component") {
+      if (this.mc.constructor.name !== "MC") {
+        this.mc = this.mc.mc;
+      }
 
-	render(state, mc, engine) {
-		Boolean(state.fcCollection.size) && engine.renderFunctionContainer(state, mc);
-		Boolean(state.virtualCollection.size) && engine.renderComponentWork(state, mc);
-		Boolean(state.effectCollection.size) && engine.runEffectWork(state, mc);
-	}
+      this.mc.setCurrentRenderingInstance(VDOM.component.uniquekey);
+      const stateObject = this.formationStates(VDOM);
+      const JQ_CONTAINER = VDOM.draw.call(
+        VDOM.component,
+        stateObject,
+        VDOM.normalized.props,
+        VDOM
+      );
+      this.mc.deleteKeyCurrentRenderingInstance(VDOM.component.uniquekey);
+      NEW_HTML =
+        this.jqToHtml(JQ_CONTAINER) ?? new MC_Element().createEmptyElement();
+      NEW_HTML.instanceMC = VDOM.id;
+      NEW_HTML.instanceMCtype = "mc_component";
+      VDOM.HTML = NEW_HTML;
+    } else {
+      const JQ_CONTAINER = VDOM.draw(
+        this.getArrayValuesStates(VDOM),
+        VDOM.props
+      );
+      NEW_HTML =
+        this.jqToHtml(JQ_CONTAINER) ?? new MC_Element().createEmptyElement();
 
-	/**
-	 * Контролируемый рендер для классового компонента
-	 */
-	controlledRender(VDOM, type = 'mc_component') {
-		if (type === 'mc_component') {
-			this.diffingComponent(VDOM);
-			return;
-		}
+      NEW_HTML.instanceMC = VDOM.id;
+      NEW_HTML.instanceMCtype = "fn";
+      VDOM.HTML = NEW_HTML;
+    }
 
-		this.diffing(VDOM);
-	}
+    return VDOM.HTML;
+  }
 
-	getArrayValuesStates(virtual) {
-		return Array.from(virtual.states.values());
-	}
+  render(state, mc, engine) {
+    const hasFC = Boolean(state.fcCollection.size);
+    const hasVC = Boolean(state.virtualCollection.size);
+    const hasFX = Boolean(state.effectCollection.size);
 
-	renderFunctionContainer(state, mc) {
-		if (mc.constructor.name !== 'MC') {
-			mc = mc.mc;
-		}
+    if (hasFC) engine.renderFunctionContainer(state, mc);
+    if (hasVC) engine.renderComponentWork(state, mc);
+    if (hasFX) engine.runEffectWork(state, mc);
 
-		state.fcCollection.forEach((item) => {
-			const virtual = mc.fcCollection.get(item.effectKey);
-			const value = virtual.states.get(state.id);
+    // Планируем очистку мёртвых контейнеров (без блокировки рендера)
+    if (mc.constructor.name !== "MC") {
+      mc = mc.mc; // если вызов из дочернего контекста
+    }
 
-			if (value !== state.value) {
-				virtual.states.set(state.id, state.value);
-				this.diffing(virtual);
-			}
-		});
-	}
+    mc.scheduleCleanDeadVDOM();
+  }
 
-	renderComponentWork(state, mc) {
-		if (mc.constructor.name !== 'MC') {
-			mc = mc.mc;
-		}
+  /**
+   * Контролируемый рендер для классового компонента
+   */
+  controlledRender(VDOM, type = "mc_component") {
+    if (type === "mc_component") {
+      this.diffingComponent(VDOM);
+      return;
+    }
 
-		state.virtualCollection.forEach((item) => {
-			const virtual = mc.componentCollection.get(item.effectKey);
-			const value = virtual.states.get(state.id);
+    this.diffing(VDOM);
+  }
 
-			if (value !== state.value) {
-				virtual.states.set(state.id, state.value);
-				this.diffingComponent(virtual);
-			}
-		});
-	}
+  getArrayValuesStates(virtual) {
+    return Array.from(virtual.states.values());
+  }
 
-	runEffectWork(state, mc) {
-		if (mc.constructor.name !== 'MC') {
-			mc = mc.mc;
-		}
+  renderFunctionContainer(state, mc) {
+    if (mc.constructor.name !== "MC") {
+      mc = mc.mc;
+    }
 
-		state.effectCollection.forEach((item) => {
-			const effect = mc.effectCollection.get(item.effectKey);
-			const value = effect.states.get(state.id);
+    state.fcCollection.forEach((item) => {
+      const virtual = mc.fcCollection.get(item.effectKey);
+      const value = virtual.states.get(state.id);
 
-			if (value !== state.value) {
-				effect.states.set(state.id, state.value);
-				effect.run(this.getArrayValuesStates(effect), effect.options);
-			}
-		});
-	}
+      if (value !== state.value) {
+        virtual.states.set(state.id, state.value);
+        this.diffing(virtual);
+      }
+    });
+  }
 
-	registrController(state) {
-		const objectVirtualController = {
-			value: state.id,
-		};
+  renderComponentWork(state, mc) {
+    if (mc.constructor.name !== "MC") {
+      mc = mc.mc;
+    }
 
-		const passport = this.handlerRender(objectVirtualController, this.render, '', state);
+    state.virtualCollection.forEach((item) => {
+      const virtual = mc.componentCollection.get(item.effectKey);
+      const value = virtual.states.get(state.id);
 
-		state.setPassport(passport);
-	}
+      if (value !== state.value) {
+        virtual.states.set(state.id, state.value);
+        this.diffingComponent(virtual);
+      }
+    });
+  }
+
+  runEffectWork(state, mc) {
+    if (mc.constructor.name !== "MC") {
+      mc = mc.mc;
+    }
+
+    state.effectCollection.forEach((item) => {
+      const effect = mc.effectCollection.get(item.effectKey);
+      const value = effect.states.get(state.id);
+
+      if (value !== state.value) {
+        effect.states.set(state.id, state.value);
+
+        const unmountCallFunction = effect.run(
+          this.getArrayValuesStates(effect),
+          effect.options
+        );
+
+        if (unmountCallFunction) {
+          effect.unmountCaller = unmountCallFunction;
+        }
+      }
+    });
+  }
+
+  registrController(state) {
+    const objectVirtualController = {
+      value: state.id,
+    };
+
+    const passport = this.handlerRender(
+      objectVirtualController,
+      this.render,
+      "",
+      state
+    );
+
+    state.setPassport(passport);
+  }
 }
