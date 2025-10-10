@@ -1,4 +1,4 @@
-// MCv7
+//TODO v8 = batched render / microtask queue;
 class MCState {
   /**
    * id состояния
@@ -2093,7 +2093,7 @@ class MC {
     const { component, instruction, key, props, states } =
       this.normilizeArgs(args);
 
-    if (instruction === "effect") {
+    if (instruction === "mc_inst_effect") {
       if (this.getEffectVirtual(component, key)) {
         return;
       }
@@ -2113,7 +2113,7 @@ class MC {
     }
 
     virtual.props = props; // Обновление реквизита для функционального контейнера
-    return this.workFunctionContainer(virtual, instruction === "memo");
+    return this.workFunctionContainer(virtual, instruction === "mc_inst_memo");
   }
 
   /**
@@ -2567,7 +2567,7 @@ class MC {
       }
 
       if (this.isStateLike(arg)) {
-        if (arg.local) {
+        if (arg.local && !Array.from(args).includes("mc_inst_effect")) {
           arg.incorrectStateBindError = true;
 
           this.log.error("Неправильное назначение", [
@@ -2586,7 +2586,7 @@ class MC {
       if (Array.isArray(arg) && arg.every((item) => this.isStateLike(item))) {
         let err = false;
         arg.forEach((state) => {
-          if (state.local) {
+          if (state.local && !Array.from(args).includes("mc_inst_effect")) {
             err = true;
             state.incorrectStateBindError = true;
             this.log.error("Неправильное назначение", [
@@ -2605,7 +2605,7 @@ class MC {
         continue;
       }
 
-      if (arg === "effect" || arg === "memo") {
+      if (arg === "mc_inst_effect" || arg === "mc_inst_memo") {
         normalized.instruction = arg;
         continue;
       }
@@ -2689,18 +2689,18 @@ class MC {
   useMemo() {
     if (arguments.length === 2) {
       // нужно для добавления аргумента, при отсутствии итератора компонента
-      return this.mc.use.call(this, ...arguments, "", "memo");
+      return this.mc.use.call(this, ...arguments, "", "mc_inst_memo");
     }
 
-    return this.mc.use.call(this, ...arguments, "memo");
+    return this.mc.use.call(this, ...arguments, "mc_inst_memo");
   }
 
   useEffect() {
     if (arguments.length === 2) {
       // нужно для добавления аргумента, при отсутствии итератора компонента
-      return this.mc.use.call(this, ...arguments, "", "effect");
+      return this.mc.use.call(this, ...arguments, "", "mc_inst_effect");
     }
 
-    return this.mc.use.call(this, ...arguments, "effect");
+    return this.mc.use.call(this, ...arguments, "mc_inst_effect");
   }
 }
