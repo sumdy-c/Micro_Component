@@ -61,6 +61,11 @@ class MCState {
   static _nextObjId = 1;
 
   /**
+   * Имя свойства для объекта получения
+   */
+  nameProp;
+
+  /**
    *
    * @param {Object} stateParam
    * @param { * } local
@@ -79,6 +84,7 @@ class MCState {
     this.virtualCollection = new Set();
     this.fcCollection = new Set();
     this.effectCollection = new Set();
+    this.nameProp = null;
 
     // Инициализировать кеш-хеш для начального значения
     this._identityHash = MCState.computeShallowIdentity(value);
@@ -501,10 +507,17 @@ class MCLog {
 
 class MCEngine {
   mc;
+  /**
+   * Свойство определения конкуренции
+   */
+  competitionСounter;
+  
 
   constructor(mc) {
     this.mc = mc;
     this.diff = new MCDiff(this.mc);
+    this.competitionСounter = false;
+    this.count = 0;
   }
 
   handlerRender(target, fn, path, state) {
@@ -526,6 +539,17 @@ class MCEngine {
       },
       set: (_, prop) => {
         try {
+          if(this.mc.getCurrentRenderingInstance()) {
+            let instance = this.mc;
+
+            if(instance.constructor.name !== 'MC') {
+              instance = instance.mc;
+            }
+
+            instance.listPendingRedrawRequests.add(state.id);
+            return target[prop];
+          }
+
           fn(state, this.mc, this);
           return target[prop];
         } catch (error) {
@@ -566,10 +590,7 @@ class MCEngine {
    * Формирование состояния реквизита
    */
   formationStates(VDOM) {
-    const stateObject = {
-      global: [],
-      local: [],
-    };
+    const stateObject = {};
 
     for (const state of VDOM.normalized.states) {
       if (state.incorrectStateBindError) {
@@ -577,9 +598,9 @@ class MCEngine {
       }
 
       if (state.local) {
-        stateObject.local.push(state.get());
+        stateObject[state.nameProp] = [ state.get(), (value) => state.set(value), state]
       } else {
-        stateObject.global.push(state.get());
+        stateObject[state.nameProp] = [ state.get(), (value) => state.set(value), state]
       }
     }
 
@@ -592,20 +613,35 @@ class MCEngine {
     }
 
     this.mc.setCurrentRenderingInstance(VDOM.key);
+ 
     const stateObject = this.formationStates(VDOM);
+
     const JQ_CONTAINER = VDOM.draw.call(
       VDOM.component,
       stateObject,
       VDOM.normalized.props,
       VDOM
     );
-    this.mc.resetCurrentRenderingInstance();
-    const NEW_HTML =
-      this.jqToHtml(JQ_CONTAINER) ?? new MC_Element().createEmptyElement();
 
+    this.mc.resetCurrentRenderingInstance();
+
+    const NEW_HTML = this.jqToHtml(JQ_CONTAINER) ?? new MC_Element().createEmptyElement();
     NEW_HTML.instanceMC = VDOM.id;
     NEW_HTML.instanceMCtype = "mc_component";
     VDOM.HTML = this.diff.start(VDOM.HTML, NEW_HTML);
+    
+    // Создаём проход на отложенныe вызовы
+    if(this.mc.listPendingRedrawRequests.size) {
+
+      this.mc.listPendingRedrawRequests.forEach((stateId) => {
+        const state = this.mc.getStateID(stateId);
+          if(state.passport) {
+            state.passport.value = state.value;
+          }
+      });
+
+      this.mc.listPendingRedrawRequests.clear();
+    }
   }
 
   /**
@@ -620,7 +656,9 @@ class MCEngine {
       }
 
       this.mc.setCurrentRenderingInstance(VDOM.component.uniquekey);
+
       const stateObject = this.formationStates(VDOM);
+      
       const JQ_CONTAINER = VDOM.draw.call(
         VDOM.component,
         stateObject,
@@ -628,6 +666,7 @@ class MCEngine {
         VDOM
       );
       this.mc.deleteKeyCurrentRenderingInstance(VDOM.component.uniquekey);
+
       NEW_HTML =
         this.jqToHtml(JQ_CONTAINER) ?? new MC_Element().createEmptyElement();
       NEW_HTML.instanceMC = VDOM.id;
@@ -645,7 +684,6 @@ class MCEngine {
       NEW_HTML.instanceMCtype = "fn";
       VDOM.HTML = NEW_HTML;
     }
-
     return VDOM.HTML;
   }
 
@@ -658,16 +696,15 @@ class MCEngine {
     if (hasVC) engine.renderComponentWork(state, mc);
     if (hasFX) engine.runEffectWork(state, mc);
 
-    // Планируем очистку мёртвых контейнеров (без блокировки рендера)
     if (mc.constructor.name !== "MC") {
-      mc = mc.mc; // если вызов из дочернего контекста
+      mc = mc.mc;
     }
 
     mc.scheduleCleanDeadVDOM();
   }
 
   /**
-   * Контролируемый рендер для классового компонента
+   * Контролируемый рендер
    */
   controlledRender(VDOM, type = "mc_component") {
     if (type === "mc_component") {
@@ -1463,6 +1500,7 @@ class MC_Component {
       HTML: new MC_Element().createEmptyElement(),
       normalized: normalized,
       component: instance,
+      // competitionСounter: 0,
     };
 
     for (const prop in instance) {
@@ -1471,6 +1509,7 @@ class MC_Component {
 
         if (localState.local && !localState.traceKey) {
           localState.traceKey = `lcl_state_${normalized.key}`;
+          localState.nameProp = prop;
           normalized.states.push(instance[prop]);
         }
 
@@ -1625,6 +1664,11 @@ class MC {
    */
   currentRenderingInstance;
 
+  /**
+   * Список отложенных запросов на перерисовку
+   */
+  listPendingRedrawRequests;
+
   constructor() {
     this.log = new MCLog(this);
     this.engine = new MCEngine(this);
@@ -1673,6 +1717,11 @@ class MC {
      * Свойство планировщика очистки
      */
     this._cleaningScheduled = false;
+
+    /**
+     * Список отложенных запросов на перерисовку
+     */
+    this.listPendingRedrawRequests = new Set();
 
     if (window.$) {
       this.original$ = window.$;
@@ -1935,15 +1984,31 @@ class MC {
   }
 
   getCurrentRenderingInstance() {
-    return Array.from(this.currentRenderingInstance).join("_");
+    let instance = this;
+    if(instance.constructor.name !== 'MC') {
+      instance = this.mc;
+    }
+
+    return Array.from(instance.currentRenderingInstance).join("_");
   }
 
   resetCurrentRenderingInstance() {
-    this.currentRenderingInstance.clear();
+    let instance = this;
+    if(instance.constructor.name !== 'MC') {
+      instance = this.mc;
+    }
+
+    instance.currentRenderingInstance.clear();
   }
 
   deleteKeyCurrentRenderingInstance(key) {
-    this.currentRenderingInstance.delete(key);
+    let instance = this;
+    
+    if(instance.constructor.name !== 'MC') {
+      instance = this.mc;
+    }
+
+    instance.currentRenderingInstance.delete(key);
   }
 
   /**
@@ -2031,6 +2096,8 @@ class MC {
 
     const state = new MCState(stateParam);
 
+    state.nameProp = traceKey;
+
     this.engine.registrController(state);
     this.mc_state_global.add(state);
 
@@ -2094,7 +2161,15 @@ class MC {
       this.normilizeArgs(args);
 
     if (instruction === "mc_inst_effect") {
-      if (this.getEffectVirtual(component, key)) {
+      const effectVirtual = this.getEffectVirtual(component, key);
+
+      if (effectVirtual) {
+        if(effectVirtual.parent) {
+          // тут надо решить, если Effect без массива состояний
+          // возможно стоит проверить на это, и не передавать новый cb (запекание контекста для SingleRndEffect )
+          effectVirtual.run = component;
+        }
+
         return;
       }
 
@@ -2413,7 +2488,7 @@ class MC {
     }
 
     if (virtual) {
-      return true;
+      return virtual;
     }
 
     return false;
