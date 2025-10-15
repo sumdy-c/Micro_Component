@@ -2401,6 +2401,16 @@ class MC {
           if (value.parent === VDOM.key) {
             value.unmountCaller();
             toDeleteEffect.push(key);
+            
+            for(const [stateKey] of value.states) {
+              const state = this.getStateID(stateKey);
+
+              for (const item of state.effectCollection) {
+                if (item.effectKey === key) {
+                  state.effectCollection.delete(item);
+                }
+              }
+            }
           }
         }
 
