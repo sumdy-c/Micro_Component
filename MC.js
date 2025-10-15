@@ -511,7 +511,6 @@ class MCEngine {
    * Свойство определения конкуренции
    */
   competitionСounter;
-  
 
   constructor(mc) {
     this.mc = mc;
@@ -539,10 +538,10 @@ class MCEngine {
       },
       set: (_, prop) => {
         try {
-          if(this.mc.getCurrentRenderingInstance()) {
+          if (this.mc.getCurrentRenderingInstance()) {
             let instance = this.mc;
 
-            if(instance.constructor.name !== 'MC') {
+            if (instance.constructor.name !== "MC") {
               instance = instance.mc;
             }
 
@@ -598,9 +597,17 @@ class MCEngine {
       }
 
       if (state.local) {
-        stateObject[state.nameProp] = [ state.get(), (value) => state.set(value), state]
+        stateObject[state.nameProp] = [
+          state.get(),
+          (value) => state.set(value),
+          state,
+        ];
       } else {
-        stateObject[state.nameProp] = [ state.get(), (value) => state.set(value), state]
+        stateObject[state.nameProp] = [
+          state.get(),
+          (value) => state.set(value),
+          state,
+        ];
       }
     }
 
@@ -613,7 +620,7 @@ class MCEngine {
     }
 
     this.mc.setCurrentRenderingInstance(VDOM.key);
- 
+
     const stateObject = this.formationStates(VDOM);
 
     const JQ_CONTAINER = VDOM.draw.call(
@@ -625,19 +632,19 @@ class MCEngine {
 
     this.mc.resetCurrentRenderingInstance();
 
-    const NEW_HTML = this.jqToHtml(JQ_CONTAINER) ?? new MC_Element().createEmptyElement();
+    const NEW_HTML =
+      this.jqToHtml(JQ_CONTAINER) ?? new MC_Element().createEmptyElement();
     NEW_HTML.instanceMC = VDOM.id;
     NEW_HTML.instanceMCtype = "mc_component";
     VDOM.HTML = this.diff.start(VDOM.HTML, NEW_HTML);
-    
-    // Создаём проход на отложенныe вызовы
-    if(this.mc.listPendingRedrawRequests.size) {
 
+    // Создаём проход на отложенныe вызовы
+    if (this.mc.listPendingRedrawRequests.size) {
       this.mc.listPendingRedrawRequests.forEach((stateId) => {
         const state = this.mc.getStateID(stateId);
-          if(state.passport) {
-            state.passport.value = state.value;
-          }
+        if (state.passport) {
+          state.passport.value = state.value;
+        }
       });
 
       this.mc.listPendingRedrawRequests.clear();
@@ -658,7 +665,7 @@ class MCEngine {
       this.mc.setCurrentRenderingInstance(VDOM.component.uniquekey);
 
       const stateObject = this.formationStates(VDOM);
-      
+
       const JQ_CONTAINER = VDOM.draw.call(
         VDOM.component,
         stateObject,
@@ -912,50 +919,171 @@ class AttrDiff {
     this.mc = mc;
   }
 
+  // diffAttributes(oldNode, newNode, ctx) {
+  //   const oldAttrs = oldNode.attributes ? Array.from(oldNode.attributes) : [];
+  //   const newAttrs = newNode.attributes ? Array.from(newNode.attributes) : [];
+  //   const set = {};
+  //   const remove = [];
+
+  //   // Новый/изменённый
+  //   for (const attr of newAttrs) {
+  //     if (oldNode.getAttribute(attr.name) !== attr.value) {
+  //       set[attr.name] = attr.value;
+  //     }
+  //   }
+  //   // Удалённый
+  //   for (const attr of oldAttrs) {
+  //     if (!newNode.hasAttribute(attr.name)) {
+  //       remove.push(attr.name);
+  //     }
+  //   }
+
+  //   return {
+  //     set,
+  //     remove,
+  //     // service,
+  //     ctx,
+  //   };
+  // }
+
+  // applyAttributes(attrPatch, domNode) {
+  //   if (!attrPatch) {
+  //     return;
+  //   }
+
+  //   for (const [attr, val] of Object.entries(attrPatch.set || {})) {
+  //     domNode.setAttribute(attr, val);
+  //   }
+
+  //   for (const attr of attrPatch.remove || []) {
+  //     domNode.removeAttribute(attr);
+  //   }
+  // }
+
   diffAttributes(oldNode, newNode, ctx) {
     const oldAttrs = oldNode.attributes ? Array.from(oldNode.attributes) : [];
     const newAttrs = newNode.attributes ? Array.from(newNode.attributes) : [];
 
-    /**
-     * @deprecated ранее искал атрибуты для восстановления связей
-     * const newAttrs = newNode.attributes ?
-     * Array.from(newNode.attributes).filter((item) => !this.serviceDiff.checkServiceAttribute(item.name)) : [];
-     */
     const set = {};
     const remove = [];
-    // const service = {};
 
-    // Новый/изменённый
+    // Стандартная логика по атрибутам (атрибуты как есть)
     for (const attr of newAttrs) {
       if (oldNode.getAttribute(attr.name) !== attr.value) {
         set[attr.name] = attr.value;
       }
     }
-    // Удалённый
     for (const attr of oldAttrs) {
       if (!newNode.hasAttribute(attr.name)) {
         remove.push(attr.name);
       }
     }
 
+    if (oldNode.nodeType === 1 && newNode.nodeType === 1) {
+      const tag = (newNode.tagName || "").toLowerCase();
+
+      // value для input/textarea/select
+      if (tag === "input" || tag === "textarea" || tag === "select") {
+        // сравниваем property value (текущее) с новой версией
+        const oldVal =
+          oldNode.value != null
+            ? String(oldNode.value)
+            : oldNode.getAttribute("value");
+        const newVal =
+          newNode.value != null
+            ? String(newNode.value)
+            : newNode.getAttribute("value");
+        if (oldVal !== newVal) {
+          set["value"] = newVal == null ? "" : newVal;
+        }
+      }
+
+      // checked для checkbox/radio — ставим/удаляем реальный атрибут checked
+      if (
+        tag === "input" &&
+        (newNode.type === "checkbox" || newNode.type === "radio")
+      ) {
+        const oldChecked = !!oldNode.checked;
+        const newChecked = !!newNode.checked;
+        if (oldChecked !== newChecked) {
+          if (newChecked) {
+            set["checked"] = "checked";
+          } else {
+            // поместим в remove — так как атрибут должен быть удалён
+            remove.push("checked");
+          }
+        }
+      }
+    }
+
     return {
       set,
       remove,
-      // service,
       ctx,
     };
   }
 
   applyAttributes(attrPatch, domNode) {
-    if (!attrPatch) {
-      return;
-    }
+    if (!attrPatch) return;
 
+    // Применяем "set" (включая value/checked)
     for (const [attr, val] of Object.entries(attrPatch.set || {})) {
+      if (attr === "value") {
+        // property + атрибут — чтобы и отображение, и атрибут были синхронизированы
+        try {
+          if ("value" in domNode) domNode.value = val;
+        } catch (e) {
+          /* ignore */
+        }
+        // setAttribute для совместимости/серриализации
+        domNode.setAttribute("value", val);
+
+        // Если это select — синхронизируем опции (selected атрибуты)
+        if (domNode.tagName && domNode.tagName.toLowerCase() === "select") {
+          const desired = String(val);
+          for (const opt of domNode.options || []) {
+            const isSelected = opt.value === desired;
+            opt.selected = isSelected;
+            if (isSelected) opt.setAttribute("selected", "selected");
+            else opt.removeAttribute("selected");
+          }
+        }
+        continue;
+      }
+
+      if (attr === "checked") {
+        // val будет 'checked' — выставим property и атрибут
+        if ("checked" in domNode) domNode.checked = true;
+        domNode.setAttribute("checked", "checked");
+        // для radio: при установке checked property браузер снимет checked с других в группе автоматически
+        continue;
+      }
+
+      // Обычные атрибуты
       domNode.setAttribute(attr, val);
     }
 
+    // Обработка удалений
     for (const attr of attrPatch.remove || []) {
+      if (attr === "checked") {
+        if ("checked" in domNode) domNode.checked = false;
+        domNode.removeAttribute("checked");
+        continue;
+      }
+      if (attr === "value") {
+        // если удалили value как атрибут — очистим property тоже (т.к. пользователь ожидает отсутствие значения)
+        if ("value" in domNode) domNode.value = "";
+        domNode.removeAttribute("value");
+        // для select — убрать selected у всех опций
+        if (domNode.tagName && domNode.tagName.toLowerCase() === "select") {
+          for (const opt of domNode.options || []) {
+            opt.selected = false;
+            opt.removeAttribute("selected");
+          }
+        }
+        continue;
+      }
+
       domNode.removeAttribute(attr);
     }
   }
@@ -1985,7 +2113,7 @@ class MC {
 
   getCurrentRenderingInstance() {
     let instance = this;
-    if(instance.constructor.name !== 'MC') {
+    if (instance.constructor.name !== "MC") {
       instance = this.mc;
     }
 
@@ -1994,7 +2122,7 @@ class MC {
 
   resetCurrentRenderingInstance() {
     let instance = this;
-    if(instance.constructor.name !== 'MC') {
+    if (instance.constructor.name !== "MC") {
       instance = this.mc;
     }
 
@@ -2003,8 +2131,8 @@ class MC {
 
   deleteKeyCurrentRenderingInstance(key) {
     let instance = this;
-    
-    if(instance.constructor.name !== 'MC') {
+
+    if (instance.constructor.name !== "MC") {
       instance = this.mc;
     }
 
@@ -2164,7 +2292,7 @@ class MC {
       const effectVirtual = this.getEffectVirtual(component, key);
 
       if (effectVirtual) {
-        if(effectVirtual.parent) {
+        if (effectVirtual.parent) {
           // тут надо решить, если Effect без массива состояний
           // возможно стоит проверить на это, и не передавать новый cb (запекание контекста для SingleRndEffect )
           effectVirtual.run = component;
@@ -2401,8 +2529,8 @@ class MC {
           if (value.parent === VDOM.key) {
             value.unmountCaller();
             toDeleteEffect.push(key);
-            
-            for(const [stateKey] of value.states) {
+
+            for (const [stateKey] of value.states) {
               const state = this.getStateID(stateKey);
 
               for (const item of state.effectCollection) {
