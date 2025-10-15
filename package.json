@@ -3,7 +3,9 @@
   "version": "0.7.6",
   "description": "Micro Component is a lightweight and powerful library designed to enhance jQuery with seamless reactivity.",
   "main": "MC.min.js",
-  "scripts": {},
+  "scripts": {
+    "push:patch": "npm version patch && npm publish"
+  },
   "repository": {
     "type": "git",
     "url": "git+https://github.com/sumdy-c/Micro_Component.git"
