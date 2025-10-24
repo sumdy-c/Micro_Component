@@ -2532,10 +2532,12 @@ class MC {
 
             for (const [stateKey] of value.states) {
               const state = this.getStateID(stateKey);
-
-              for (const item of state.effectCollection) {
-                if (item.effectKey === key) {
-                  state.effectCollection.delete(item);
+              
+              if(state) {
+                for (const item of state.effectCollection) {
+                  if (item.effectKey === key) {
+                    state.effectCollection.delete(item);
+                  }
                 }
               }
             }
