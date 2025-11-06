@@ -919,174 +919,230 @@ class AttrDiff {
     this.mc = mc;
   }
 
+  // deprecated
   // diffAttributes(oldNode, newNode, ctx) {
   //   const oldAttrs = oldNode.attributes ? Array.from(oldNode.attributes) : [];
   //   const newAttrs = newNode.attributes ? Array.from(newNode.attributes) : [];
+
   //   const set = {};
   //   const remove = [];
 
-  //   // Новый/изменённый
+  //   // Стандартная логика по атрибутам (атрибуты как есть)
   //   for (const attr of newAttrs) {
   //     if (oldNode.getAttribute(attr.name) !== attr.value) {
   //       set[attr.name] = attr.value;
   //     }
   //   }
-  //   // Удалённый
   //   for (const attr of oldAttrs) {
   //     if (!newNode.hasAttribute(attr.name)) {
   //       remove.push(attr.name);
   //     }
   //   }
 
+  //   if (oldNode.nodeType === 1 && newNode.nodeType === 1) {
+  //     const tag = (newNode.tagName || "").toLowerCase();
+
+  //     // value для input/textarea/select
+  //     if (tag === "input" || tag === "textarea" || tag === "select") {
+  //       // сравниваем property value (текущее) с новой версией
+  //       const oldVal =
+  //         oldNode.value != null
+  //           ? String(oldNode.value)
+  //           : oldNode.getAttribute("value");
+  //       const newVal =
+  //         newNode.value != null
+  //           ? String(newNode.value)
+  //           : newNode.getAttribute("value");
+  //       if (oldVal !== newVal) {
+  //         set["value"] = newVal == null ? "" : newVal;
+  //       }
+  //     }
+
+  //     // checked для checkbox/radio — ставим/удаляем реальный атрибут checked
+  //     if (
+  //       tag === "input" &&
+  //       (newNode.type === "checkbox" || newNode.type === "radio")
+  //     ) {
+  //       const oldChecked = !!oldNode.checked;
+  //       const newChecked = !!newNode.checked;
+  //       if (oldChecked !== newChecked) {
+  //         if (newChecked) {
+  //           set["checked"] = "checked";
+  //         } else {
+  //           // поместим в remove — так как атрибут должен быть удалён
+  //           remove.push("checked");
+  //         }
+  //       }
+  //     }
+  //   }
+
   //   return {
   //     set,
   //     remove,
-  //     // service,
   //     ctx,
   //   };
   // }
 
   // applyAttributes(attrPatch, domNode) {
-  //   if (!attrPatch) {
-  //     return;
-  //   }
+  //   if (!attrPatch) return;
 
+  //   // Применяем "set" (включая value/checked)
   //   for (const [attr, val] of Object.entries(attrPatch.set || {})) {
+  //     if (attr === "value") {
+  //       // property + атрибут — чтобы и отображение, и атрибут были синхронизированы
+  //       try {
+  //         if ("value" in domNode) domNode.value = val;
+  //       } catch (e) {
+  //         /* ignore */
+  //       }
+  //       // setAttribute для совместимости/серриализации
+  //       domNode.setAttribute("value", val);
+
+  //       // Если это select — синхронизируем опции (selected атрибуты)
+  //       if (domNode.tagName && domNode.tagName.toLowerCase() === "select") {
+  //         const desired = String(val);
+  //         for (const opt of domNode.options || []) {
+  //           const isSelected = opt.value === desired;
+  //           opt.selected = isSelected;
+  //           if (isSelected) opt.setAttribute("selected", "selected");
+  //           else opt.removeAttribute("selected");
+  //         }
+  //       }
+  //       continue;
+  //     }
+
+  //     if (attr === "checked") {
+  //       // val будет 'checked' — выставим property и атрибут
+  //       if ("checked" in domNode) domNode.checked = true;
+  //       domNode.setAttribute("checked", "checked");
+  //       // для radio: при установке checked property браузер снимет checked с других в группе автоматически
+  //       continue;
+  //     }
+
+  //     // Обычные атрибуты
   //     domNode.setAttribute(attr, val);
   //   }
 
+  //   // Обработка удалений
   //   for (const attr of attrPatch.remove || []) {
+  //     if (attr === "checked") {
+  //       if ("checked" in domNode) domNode.checked = false;
+  //       domNode.removeAttribute("checked");
+  //       continue;
+  //     }
+  //     if (attr === "value") {
+  //       // если удалили value как атрибут — очистим property тоже (т.к. пользователь ожидает отсутствие значения)
+  //       if ("value" in domNode) domNode.value = "";
+  //       domNode.removeAttribute("value");
+  //       // для select — убрать selected у всех опций
+  //       if (domNode.tagName && domNode.tagName.toLowerCase() === "select") {
+  //         for (const opt of domNode.options || []) {
+  //           opt.selected = false;
+  //           opt.removeAttribute("selected");
+  //         }
+  //       }
+  //       continue;
+  //     }
+
   //     domNode.removeAttribute(attr);
   //   }
   // }
 
   diffAttributes(oldNode, newNode, ctx) {
-    const oldAttrs = oldNode.attributes ? Array.from(oldNode.attributes) : [];
-    const newAttrs = newNode.attributes ? Array.from(newNode.attributes) : [];
+  const oldAttrs = oldNode.attributes ? Array.from(oldNode.attributes) : [];
+  const newAttrs = newNode.attributes ? Array.from(newNode.attributes) : [];
 
-    const set = {};
-    const remove = [];
+  const set = {};
+  const remove = [];
 
-    // Стандартная логика по атрибутам (атрибуты как есть)
-    for (const attr of newAttrs) {
-      if (oldNode.getAttribute(attr.name) !== attr.value) {
-        set[attr.name] = attr.value;
-      }
-    }
-    for (const attr of oldAttrs) {
-      if (!newNode.hasAttribute(attr.name)) {
-        remove.push(attr.name);
-      }
-    }
+  // булевые атрибуты обрабатываем отдельно (checked, selected, readonly ...)
+  const booleanAttrs = new Set([
+    "checked",
+    "selected",
+    "disabled",
+    "readonly",
+    "multiple",
+    "required",
+    "open",
+    "hidden"
+  ]);
 
-    if (oldNode.nodeType === 1 && newNode.nodeType === 1) {
-      const tag = (newNode.tagName || "").toLowerCase();
-
-      // value для input/textarea/select
-      if (tag === "input" || tag === "textarea" || tag === "select") {
-        // сравниваем property value (текущее) с новой версией
-        const oldVal =
-          oldNode.value != null
-            ? String(oldNode.value)
-            : oldNode.getAttribute("value");
-        const newVal =
-          newNode.value != null
-            ? String(newNode.value)
-            : newNode.getAttribute("value");
-        if (oldVal !== newVal) {
-          set["value"] = newVal == null ? "" : newVal;
-        }
-      }
-
-      // checked для checkbox/radio — ставим/удаляем реальный атрибут checked
-      if (
-        tag === "input" &&
-        (newNode.type === "checkbox" || newNode.type === "radio")
-      ) {
-        const oldChecked = !!oldNode.checked;
-        const newChecked = !!newNode.checked;
-        if (oldChecked !== newChecked) {
-          if (newChecked) {
-            set["checked"] = "checked";
-          } else {
-            // поместим в remove — так как атрибут должен быть удалён
-            remove.push("checked");
-          }
-        }
-      }
-    }
-
-    return {
-      set,
-      remove,
-      ctx,
-    };
-  }
-
-  applyAttributes(attrPatch, domNode) {
-    if (!attrPatch) return;
-
-    // Применяем "set" (включая value/checked)
-    for (const [attr, val] of Object.entries(attrPatch.set || {})) {
-      if (attr === "value") {
-        // property + атрибут — чтобы и отображение, и атрибут были синхронизированы
-        try {
-          if ("value" in domNode) domNode.value = val;
-        } catch (e) {
-          /* ignore */
-        }
-        // setAttribute для совместимости/серриализации
-        domNode.setAttribute("value", val);
-
-        // Если это select — синхронизируем опции (selected атрибуты)
-        if (domNode.tagName && domNode.tagName.toLowerCase() === "select") {
-          const desired = String(val);
-          for (const opt of domNode.options || []) {
-            const isSelected = opt.value === desired;
-            opt.selected = isSelected;
-            if (isSelected) opt.setAttribute("selected", "selected");
-            else opt.removeAttribute("selected");
-          }
-        }
-        continue;
-      }
-
-      if (attr === "checked") {
-        // val будет 'checked' — выставим property и атрибут
-        if ("checked" in domNode) domNode.checked = true;
-        domNode.setAttribute("checked", "checked");
-        // для radio: при установке checked property браузер снимет checked с других в группе автоматически
-        continue;
-      }
-
-      // Обычные атрибуты
-      domNode.setAttribute(attr, val);
-    }
-
-    // Обработка удалений
-    for (const attr of attrPatch.remove || []) {
-      if (attr === "checked") {
-        if ("checked" in domNode) domNode.checked = false;
-        domNode.removeAttribute("checked");
-        continue;
-      }
-      if (attr === "value") {
-        // если удалили value как атрибут — очистим property тоже (т.к. пользователь ожидает отсутствие значения)
-        if ("value" in domNode) domNode.value = "";
-        domNode.removeAttribute("value");
-        // для select — убрать selected у всех опций
-        if (domNode.tagName && domNode.tagName.toLowerCase() === "select") {
-          for (const opt of domNode.options || []) {
-            opt.selected = false;
-            opt.removeAttribute("selected");
-          }
-        }
-        continue;
-      }
-
-      domNode.removeAttribute(attr);
+  // Стандартная логика по атрибутам (но пропускаем булевые)
+  for (const attr of newAttrs) {
+    if (booleanAttrs.has(attr.name)) continue; // обработаем ниже
+    const oldVal = oldNode.getAttribute(attr.name);
+    if (oldVal !== attr.value) {
+      set[attr.name] = attr.value;
     }
   }
+
+  for (const attr of oldAttrs) {
+    if (booleanAttrs.has(attr.name)) continue; // обработаем ниже
+    if (!newNode.hasAttribute(attr.name)) {
+      remove.push(attr.name);
+    }
+  }
+
+  if (oldNode.nodeType === 1 && newNode.nodeType === 1) {
+    const tag = (newNode.tagName || "").toLowerCase();
+
+    // value для input/textarea/select (сравниваем property в приоритете)
+    if (tag === "input" || tag === "textarea" || tag === "select") {
+      const oldVal =
+        oldNode.value != null ? String(oldNode.value) : oldNode.getAttribute("value");
+      const newVal =
+        newNode.value != null ? String(newNode.value) : newNode.getAttribute("value");
+      if (oldVal !== newVal) {
+        set["value"] = newVal == null ? "" : newVal;
+      }
+    }
+
+    // checked для checkbox/radio — обработать через property
+    if (
+      tag === "input" &&
+      (newNode.type === "checkbox" || newNode.type === "radio")
+    ) {
+      const oldChecked = !!oldNode.checked;
+      const newChecked = !!newNode.checked;
+      if (oldChecked !== newChecked) {
+        if (newChecked) {
+          set["checked"] = "checked";
+        } else {
+          remove.push("checked");
+        }
+      }
+    }
+
+    // selected для select/option
+    if (tag === "option") {
+      const oldSelected = !!oldNode.selected;
+      const newSelected = !!newNode.selected;
+      if (oldSelected !== newSelected) {
+        if (newSelected) set["selected"] = "selected";
+        else remove.push("selected");
+      }
+    }
+  }
+
+  // Удаляем из remove те имена, которые мы только что добавили в set — чтобы не было "set" и "remove" одновременно.
+  if (remove.length) {
+    const filtered = [];
+    const seen = new Set();
+    for (const name of remove) {
+      if (name in set) continue;
+      if (seen.has(name)) continue;
+      seen.add(name);
+      filtered.push(name);
+    }
+    remove.length = 0;
+    Array.prototype.push.apply(remove, filtered);
+  }
+
+  return { set, remove, ctx };
+}
+
+  
+
 }
 
 // =================== STYLE DIFF ===================
