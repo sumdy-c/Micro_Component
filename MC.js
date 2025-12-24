@@ -1,4 +1,4 @@
-//TODO v8 = batched render / microtask queue;
+// v7.5
 class MCState {
   /**
    * id состояния
@@ -176,15 +176,55 @@ class MCState {
       return;
     }
 
-    // 3) Если есть паспорт — изменяем
-    if (this.passport) {
-      this.value = newValue;
-      this.passport.value = this.value;
+      if (this.passport) {
+        this.value = newValue;
 
-      // инкремент версии и обновление кеша идентификатора
-      this._version++;
-      this._identityHash = MCState.computeShallowIdentity(newValue);
-    }
+        const MCInstance = _mc_instance_restore_object.instance;
+
+        // чтобы последний set стал последним в очереди
+        MCInstance.listPendingRedrawRequests.delete(this.id);
+        MCInstance.listPendingRedrawRequests.add(this.id);
+
+        if (!MCInstance._batchUpdateScheduled) {
+          MCInstance._batchUpdateScheduled = true;
+
+          queueMicrotask(() => {
+            const MCInstance = _mc_instance_restore_object.instance;
+
+            const runFlush = () => {
+              const ids = Array.from(MCInstance.listPendingRedrawRequests);
+              MCInstance.listPendingRedrawRequests.clear();
+
+              if (!ids.length) {
+                MCInstance._batchUpdateScheduled = false;
+                return;
+              }
+
+              MCInstance._batching = true;
+
+              for (let i = 0; i < ids.length; i++) {
+                const st = MCInstance.getStateID(ids[i]);
+                if (!st?.passport) continue;
+
+                if (i === ids.length - 1) MCInstance._batching = false;
+                st.passport.value = st.value;
+              }
+
+              MCInstance._batching = false;
+
+              // ✅ если во время flush добавились новые set'ы (как у тебя в effect) — прогоняем ещё раз
+              if (MCInstance.listPendingRedrawRequests.size) {
+                queueMicrotask(runFlush);
+                return;
+              }
+
+              MCInstance._batchUpdateScheduled = false;
+            };
+
+            runFlush();
+          });
+        }
+      }
   }
 
   /**
@@ -536,25 +576,22 @@ class MCEngine {
         }
         return Reflect.get(...arguments);
       },
-      set: (_, prop) => {
-        try {
-          if (this.mc.getCurrentRenderingInstance()) {
-            let instance = this.mc;
+      set: (target, prop, value) => {
+        target[prop] = value;
 
-            if (instance.constructor.name !== "MC") {
-              instance = instance.mc;
-            }
+        let instance = this.mc;
+        if (instance.constructor.name !== "MC") instance = instance.mc;
 
-            instance.listPendingRedrawRequests.add(state.id);
-            return target[prop];
-          }
-
-          fn(state, this.mc, this);
-          return target[prop];
-        } catch (error) {
-          console.log(error);
+        if (instance.getCurrentRenderingInstance()) {
+          instance.listPendingRedrawRequests.add(state.id);
+          return true;
         }
-      },
+
+        if (!instance._batching) {
+          fn(state, this.mc, this);
+        }
+        return true;
+      }
     });
 
     return proxy;
@@ -919,230 +956,133 @@ class AttrDiff {
     this.mc = mc;
   }
 
-  // deprecated
-  // diffAttributes(oldNode, newNode, ctx) {
-  //   const oldAttrs = oldNode.attributes ? Array.from(oldNode.attributes) : [];
-  //   const newAttrs = newNode.attributes ? Array.from(newNode.attributes) : [];
-
-  //   const set = {};
-  //   const remove = [];
-
-  //   // Стандартная логика по атрибутам (атрибуты как есть)
-  //   for (const attr of newAttrs) {
-  //     if (oldNode.getAttribute(attr.name) !== attr.value) {
-  //       set[attr.name] = attr.value;
-  //     }
-  //   }
-  //   for (const attr of oldAttrs) {
-  //     if (!newNode.hasAttribute(attr.name)) {
-  //       remove.push(attr.name);
-  //     }
-  //   }
-
-  //   if (oldNode.nodeType === 1 && newNode.nodeType === 1) {
-  //     const tag = (newNode.tagName || "").toLowerCase();
-
-  //     // value для input/textarea/select
-  //     if (tag === "input" || tag === "textarea" || tag === "select") {
-  //       // сравниваем property value (текущее) с новой версией
-  //       const oldVal =
-  //         oldNode.value != null
-  //           ? String(oldNode.value)
-  //           : oldNode.getAttribute("value");
-  //       const newVal =
-  //         newNode.value != null
-  //           ? String(newNode.value)
-  //           : newNode.getAttribute("value");
-  //       if (oldVal !== newVal) {
-  //         set["value"] = newVal == null ? "" : newVal;
-  //       }
-  //     }
-
-  //     // checked для checkbox/radio — ставим/удаляем реальный атрибут checked
-  //     if (
-  //       tag === "input" &&
-  //       (newNode.type === "checkbox" || newNode.type === "radio")
-  //     ) {
-  //       const oldChecked = !!oldNode.checked;
-  //       const newChecked = !!newNode.checked;
-  //       if (oldChecked !== newChecked) {
-  //         if (newChecked) {
-  //           set["checked"] = "checked";
-  //         } else {
-  //           // поместим в remove — так как атрибут должен быть удалён
-  //           remove.push("checked");
-  //         }
-  //       }
-  //     }
-  //   }
-
-  //   return {
-  //     set,
-  //     remove,
-  //     ctx,
-  //   };
-  // }
-
-  // applyAttributes(attrPatch, domNode) {
-  //   if (!attrPatch) return;
-
-  //   // Применяем "set" (включая value/checked)
-  //   for (const [attr, val] of Object.entries(attrPatch.set || {})) {
-  //     if (attr === "value") {
-  //       // property + атрибут — чтобы и отображение, и атрибут были синхронизированы
-  //       try {
-  //         if ("value" in domNode) domNode.value = val;
-  //       } catch (e) {
-  //         /* ignore */
-  //       }
-  //       // setAttribute для совместимости/серриализации
-  //       domNode.setAttribute("value", val);
-
-  //       // Если это select — синхронизируем опции (selected атрибуты)
-  //       if (domNode.tagName && domNode.tagName.toLowerCase() === "select") {
-  //         const desired = String(val);
-  //         for (const opt of domNode.options || []) {
-  //           const isSelected = opt.value === desired;
-  //           opt.selected = isSelected;
-  //           if (isSelected) opt.setAttribute("selected", "selected");
-  //           else opt.removeAttribute("selected");
-  //         }
-  //       }
-  //       continue;
-  //     }
-
-  //     if (attr === "checked") {
-  //       // val будет 'checked' — выставим property и атрибут
-  //       if ("checked" in domNode) domNode.checked = true;
-  //       domNode.setAttribute("checked", "checked");
-  //       // для radio: при установке checked property браузер снимет checked с других в группе автоматически
-  //       continue;
-  //     }
-
-  //     // Обычные атрибуты
-  //     domNode.setAttribute(attr, val);
-  //   }
-
-  //   // Обработка удалений
-  //   for (const attr of attrPatch.remove || []) {
-  //     if (attr === "checked") {
-  //       if ("checked" in domNode) domNode.checked = false;
-  //       domNode.removeAttribute("checked");
-  //       continue;
-  //     }
-  //     if (attr === "value") {
-  //       // если удалили value как атрибут — очистим property тоже (т.к. пользователь ожидает отсутствие значения)
-  //       if ("value" in domNode) domNode.value = "";
-  //       domNode.removeAttribute("value");
-  //       // для select — убрать selected у всех опций
-  //       if (domNode.tagName && domNode.tagName.toLowerCase() === "select") {
-  //         for (const opt of domNode.options || []) {
-  //           opt.selected = false;
-  //           opt.removeAttribute("selected");
-  //         }
-  //       }
-  //       continue;
-  //     }
-
-  //     domNode.removeAttribute(attr);
-  //   }
-  // }
-
   diffAttributes(oldNode, newNode, ctx) {
-  const oldAttrs = oldNode.attributes ? Array.from(oldNode.attributes) : [];
-  const newAttrs = newNode.attributes ? Array.from(newNode.attributes) : [];
+    const oldAttrs = oldNode.attributes ? Array.from(oldNode.attributes) : [];
+    const newAttrs = newNode.attributes ? Array.from(newNode.attributes) : [];
 
-  const set = {};
-  const remove = [];
+    const set = {};
+    const remove = [];
 
-  // булевые атрибуты обрабатываем отдельно (checked, selected, readonly ...)
-  const booleanAttrs = new Set([
-    "checked",
-    "selected",
-    "disabled",
-    "readonly",
-    "multiple",
-    "required",
-    "open",
-    "hidden"
-  ]);
-
-  // Стандартная логика по атрибутам (но пропускаем булевые)
-  for (const attr of newAttrs) {
-    if (booleanAttrs.has(attr.name)) continue; // обработаем ниже
-    const oldVal = oldNode.getAttribute(attr.name);
-    if (oldVal !== attr.value) {
-      set[attr.name] = attr.value;
+    // Стандартная логика по атрибутам (атрибуты как есть)
+    for (const attr of newAttrs) {
+      if (oldNode.getAttribute(attr.name) !== attr.value) {
+        set[attr.name] = attr.value;
+      }
     }
-  }
-
-  for (const attr of oldAttrs) {
-    if (booleanAttrs.has(attr.name)) continue; // обработаем ниже
-    if (!newNode.hasAttribute(attr.name)) {
-      remove.push(attr.name);
-    }
-  }
-
-  if (oldNode.nodeType === 1 && newNode.nodeType === 1) {
-    const tag = (newNode.tagName || "").toLowerCase();
-
-    // value для input/textarea/select (сравниваем property в приоритете)
-    if (tag === "input" || tag === "textarea" || tag === "select") {
-      const oldVal =
-        oldNode.value != null ? String(oldNode.value) : oldNode.getAttribute("value");
-      const newVal =
-        newNode.value != null ? String(newNode.value) : newNode.getAttribute("value");
-      if (oldVal !== newVal) {
-        set["value"] = newVal == null ? "" : newVal;
+    for (const attr of oldAttrs) {
+      if (!newNode.hasAttribute(attr.name)) {
+        remove.push(attr.name);
       }
     }
 
-    // checked для checkbox/radio — обработать через property
-    if (
-      tag === "input" &&
-      (newNode.type === "checkbox" || newNode.type === "radio")
-    ) {
-      const oldChecked = !!oldNode.checked;
-      const newChecked = !!newNode.checked;
-      if (oldChecked !== newChecked) {
-        if (newChecked) {
-          set["checked"] = "checked";
-        } else {
-          remove.push("checked");
+    if (oldNode.nodeType === 1 && newNode.nodeType === 1) {
+      const tag = (newNode.tagName || "").toLowerCase();
+
+      // value для input/textarea/select
+      if (tag === "input" || tag === "textarea" || tag === "select") {
+        // сравниваем property value (текущее) с новой версией
+        const oldVal =
+          oldNode.value != null
+            ? String(oldNode.value)
+            : oldNode.getAttribute("value");
+        const newVal =
+          newNode.value != null
+            ? String(newNode.value)
+            : newNode.getAttribute("value");
+        if (oldVal !== newVal) {
+          set["value"] = newVal == null ? "" : newVal;
+        }
+      }
+
+      // checked для checkbox/radio — ставим/удаляем реальный атрибут checked
+      if (
+        tag === "input" &&
+        (newNode.type === "checkbox" || newNode.type === "radio")
+      ) {
+        const oldChecked = !!oldNode.checked;
+        const newChecked = !!newNode.checked;
+        if (oldChecked !== newChecked) {
+          if (newChecked) {
+            set["checked"] = "checked";
+          } else {
+            // поместим в remove — так как атрибут должен быть удалён
+            remove.push("checked");
+          }
         }
       }
     }
 
-    // selected для select/option
-    if (tag === "option") {
-      const oldSelected = !!oldNode.selected;
-      const newSelected = !!newNode.selected;
-      if (oldSelected !== newSelected) {
-        if (newSelected) set["selected"] = "selected";
-        else remove.push("selected");
+    return {
+      set,
+      remove,
+      ctx,
+    };
+  }
+
+  applyAttributes(attrPatch, domNode) {
+    if (!attrPatch) return;
+
+    // Применяем "set" (включая value/checked)
+    for (const [attr, val] of Object.entries(attrPatch.set || {})) {
+      if (attr === "value") {
+        // property + атрибут — чтобы и отображение, и атрибут были синхронизированы
+        try {
+          if ("value" in domNode) domNode.value = val;
+        } catch (e) {
+          /* ignore */
+        }
+        // setAttribute для совместимости/серриализации
+        domNode.setAttribute("value", val);
+
+        // Если это select — синхронизируем опции (selected атрибуты)
+        if (domNode.tagName && domNode.tagName.toLowerCase() === "select") {
+          const desired = String(val);
+          for (const opt of domNode.options || []) {
+            const isSelected = opt.value === desired;
+            opt.selected = isSelected;
+            if (isSelected) opt.setAttribute("selected", "selected");
+            else opt.removeAttribute("selected");
+          }
+        }
+        continue;
       }
+
+      if (attr === "checked") {
+        // val будет 'checked' — выставим property и атрибут
+        if ("checked" in domNode) domNode.checked = true;
+        domNode.setAttribute("checked", "checked");
+        // для radio: при установке checked property браузер снимет checked с других в группе автоматически
+        continue;
+      }
+
+      // Обычные атрибуты
+      domNode.setAttribute(attr, val);
+    }
+
+    // Обработка удалений
+    for (const attr of attrPatch.remove || []) {
+      if (attr === "checked") {
+        if ("checked" in domNode) domNode.checked = false;
+        domNode.removeAttribute("checked");
+        continue;
+      }
+      if (attr === "value") {
+        // если удалили value как атрибут — очистим property тоже (т.к. пользователь ожидает отсутствие значения)
+        if ("value" in domNode) domNode.value = "";
+        domNode.removeAttribute("value");
+        // для select — убрать selected у всех опций
+        if (domNode.tagName && domNode.tagName.toLowerCase() === "select") {
+          for (const opt of domNode.options || []) {
+            opt.selected = false;
+            opt.removeAttribute("selected");
+          }
+        }
+        continue;
+      }
+
+      domNode.removeAttribute(attr);
     }
   }
-
-  // Удаляем из remove те имена, которые мы только что добавили в set — чтобы не было "set" и "remove" одновременно.
-  if (remove.length) {
-    const filtered = [];
-    const seen = new Set();
-    for (const name of remove) {
-      if (name in set) continue;
-      if (seen.has(name)) continue;
-      seen.add(name);
-      filtered.push(name);
-    }
-    remove.length = 0;
-    Array.prototype.push.apply(remove, filtered);
-  }
-
-  return { set, remove, ctx };
-}
-
-  
-
 }
 
 // =================== STYLE DIFF ===================
@@ -1452,8 +1392,13 @@ class PatchMaster {
           this.mc.componentIdsCollection.get(key)
         );
 
-        if (vdom) {
+        if(vdom) {
           vdom.HTML = el;
+
+          if(vdom.HTML.isConnected && !vdom._mountedCalled) {
+            vdom.mounted();
+            vdom._mountedCalled = true;
+          }
         }
       }
     };
@@ -1496,18 +1441,19 @@ class PatchMaster {
       case "ADD":
         if (domNode && domNode.parentNode) {
           domNode.parentNode.appendChild(patch.node);
+          // this.reconnectingVDOM(patch.node);
         }
         return patch.node;
       case "REMOVE":
         if (domNode && domNode.parentNode) {
           domNode.parentNode.removeChild(domNode);
-          this.reconnectingVDOM(patch.node);
+          // this.reconnectingVDOM(patch.node);
         }
         return null;
       case "REPLACE":
         if (domNode && domNode.parentNode) {
           domNode.parentNode.replaceChild(patch.node, domNode);
-          this.reconnectingVDOM(patch.node);
+          // this.reconnectingVDOM(patch.node);
           return patch.node;
         }
         return patch.node;
@@ -1552,7 +1498,7 @@ class PatchMaster {
         // Дети
         this.applyPatch(patch.childrenPatch, domNode, context);
 
-        this.reconnectingVDOM(domNode);
+        // this.reconnectingVDOM(domNode);
         return domNode;
       case "CHILDREN":
         this._applyChildren(patch.patches, domNode, context);
@@ -1573,8 +1519,8 @@ class PatchMaster {
       const child = domNode.childNodes[i];
       // ADD: append
       if (!child && patch && patch.type === "ADD") {
-        this.reconnectingVDOM(patch.node);
         domNode.appendChild(patch.node);
+        // this.reconnectingVDOM(patch.node);
         continue;
       }
 
@@ -1591,15 +1537,15 @@ class PatchMaster {
       // RECURSIVE
       if (child && patch) {
         this.applyPatch(patch, child, ctx);
-        this.reconnectingVDOM(child);
+        // this.reconnectingVDOM(child);
       }
     }
     // Если новые дети длиннее старых — добавить недостающих
     for (let i = domNode.childNodes.length; i < childPatches.length; i++) {
       const patch = childPatches[i];
       if (patch && patch.type === "ADD") {
-        this.reconnectingVDOM(patch.node);
         domNode.appendChild(patch.node);
+        // this.reconnectingVDOM(patch.node);
       }
     }
   }
@@ -1627,25 +1573,22 @@ class MCDiff {
   }
 
   start(oldNode, newNode) {
-    try {
-      const trace = this.master.diffNode(oldNode, newNode, {
-        level: 0,
-        path: "",
-      });
-      const node = this.patch.applyPatch(trace, oldNode, {
-        level: 0,
-        path: "",
-      });
+  const mc = this.patch.mc.constructor.name === "MC" ? this.patch.mc : this.patch.mc.mc;
 
-      if (globalThis.logOn) {
-        console.log(node);
-      }
+  try {
+    mc._domObserverSuppress++;
 
-      return node;
-    } catch (e) {
-      throw e;
-    }
+    const trace = this.master.diffNode(oldNode, newNode, { level: 0, path: "" });
+    const node = this.patch.applyPatch(trace, oldNode, { level: 0, path: "" });
+
+    // reconnect после полного патча
+    if (node) this.patch.reconnectingVDOM(node);
+
+    return node;
+  } finally {
+    mc._domObserverSuppress--;
   }
+}
 }
 
 class MC_Component {
@@ -1676,6 +1619,7 @@ class MC_Component {
     const virtualElement = {
       draw: instance.render,
       mounted: instance.mounted ? instance.mounted : () => {},
+      _mountedCalled: false,
       unmounted: instance.unmounted ? instance.unmounted : () => {},
       key: normalized.key,
       id,
@@ -1684,7 +1628,6 @@ class MC_Component {
       HTML: new MC_Element().createEmptyElement(),
       normalized: normalized,
       component: instance,
-      // competitionСounter: 0,
     };
 
     for (const prop in instance) {
@@ -1854,6 +1797,8 @@ class MC {
   listPendingRedrawRequests;
 
   constructor() {
+    this._pendingMountRoots = new Set();
+    this._mountObserver = null;
     this.log = new MCLog(this);
     this.engine = new MCEngine(this);
     this.componentHandler = new MC_Component(this);
@@ -1906,6 +1851,15 @@ class MC {
      * Список отложенных запросов на перерисовку
      */
     this.listPendingRedrawRequests = new Set();
+
+    this._batching = false;
+
+    // DOM observer / cleanup
+    this._domObserver = null;
+    this._domObserverSuppress = 0;      // счетчик подавления (на время внутренних diff)
+    this._obsRemovedRoots = new Set();  // удалённые корни (кандидаты на cleanup)
+    this._obsAddedRoots = new Set();    // добавленные корни (для reconnect/mounted)
+    this._obsFlushScheduled = false;
 
     if (window.$) {
       this.original$ = window.$;
@@ -1978,31 +1932,10 @@ class MC {
       return oldOn.apply(this, arguments);
     };
 
+    this.mc._enableDomObserver();
+
     // Активация DF
     // MC.enableFragmentShortSyntax();
-  }
-
-  scheduleCleanDeadVDOM() {
-    if (this._cleaningScheduled) {
-      return;
-    }
-
-    this._cleaningScheduled = true;
-
-    const run = async () => {
-      try {
-        await this.checkAllDeadsFunctionsContainers();
-        await this.checkAllDeadsClassComponentsContainers();
-      } finally {
-        this._cleaningScheduled = false;
-      }
-    };
-
-    if ("requestIdleCallback" in window) {
-      requestIdleCallback(run, { timeout: 500 });
-    } else {
-      setTimeout(run, 200);
-    }
   }
 
   static enableFragmentShortSyntax() {
@@ -2161,6 +2094,246 @@ class MC {
       }
     });
     return context;
+  }
+
+  scheduleCleanDeadVDOM() {
+    if (this._cleaningScheduled || this._domObserver) {
+      return;
+    }
+
+    this._cleaningScheduled = true;
+
+    const run = async () => {
+      try {
+        await this.checkAllDeadsFunctionsContainers();
+        await this.checkAllDeadsClassComponentsContainers();
+      } finally {
+        this._cleaningScheduled = false;
+      }
+    };
+
+    if ("requestIdleCallback" in window) {
+      requestIdleCallback(run, { timeout: 500 });
+    } else {
+      setTimeout(run, 200);
+    }
+  }
+
+  _trackMountRoot(node) {
+    if (!node || node.nodeType !== 1) return;
+
+    // если уже в DOM — просто сделаем reconnect сразу
+    if (node.isConnected) {
+      this.engine.diff.patch.reconnectingVDOM(node);
+      return;
+    }
+
+    this._pendingMountRoots.add(node);
+    this._ensureMountObserver();
+  }
+
+  _ensureMountObserver() {
+    if (this._mountObserver) return;
+
+    this._mountObserver = new MutationObserver(() => {
+      for (const n of Array.from(this._pendingMountRoots)) {
+        if (n.isConnected) {
+          this.engine.diff.patch.reconnectingVDOM(n);
+          this._pendingMountRoots.delete(n);
+        }
+      }
+
+      if (this._pendingMountRoots.size === 0) {
+        this._mountObserver.disconnect();
+        this._mountObserver = null;
+      }
+    });
+
+    this._mountObserver.observe(document.documentElement, {
+      childList: true,
+      subtree: true,
+    });
+  }
+
+  _cleanupFunctionContainerByKey(key) {
+    const VDOM = this.fcCollection.get(key);
+    if (!VDOM) return;
+
+    // если вдруг он уже снова в DOM — не чистим
+    if (VDOM.HTML && VDOM.HTML.isConnected) return;
+
+    this.fcIdsCollection.delete(VDOM.id);
+
+    for (const [stateId] of VDOM.states) {
+      const state = this.getStateID(stateId);
+      if (!state) continue;
+
+      for (const entry of state.fcCollection) {
+        if (entry.effectKey === key) { state.fcCollection.delete(entry); break; }
+      }
+    }
+
+    this.fcCollection.delete(key);
+  }
+
+  _cleanupComponentByKey(key) {
+    const VDOM = this.componentCollection.get(key);
+    if (!VDOM) return;
+
+    if (VDOM.HTML && VDOM.HTML.isConnected) return;
+
+    // unmounted
+    try { VDOM.unmounted?.(); } catch (e) {}
+
+    this.componentIdsCollection.delete(VDOM.id);
+
+    for (const [stateId] of VDOM.states) {
+      const state = this.getStateID(stateId);
+      if (!state) continue;
+
+      for (const entry of state.virtualCollection) {
+        if (entry.effectKey === key) { state.virtualCollection.delete(entry); break; }
+      }
+
+      if (state.local && state.virtualCollection.size === 0) {
+        this.mc_state_global.delete(state);
+      }
+    }
+
+    // эффекты: сейчас у тебя это O(все эффекты), но мы оставим как есть для совместимости
+    const toDeleteEffect = [];
+    for (const [ekey, eff] of this.effectCollection) {
+      if (eff.parent === VDOM.key) {
+        try { eff.unmountCaller(); } catch (e) {}
+        toDeleteEffect.push(ekey);
+
+        for (const [stateKey] of eff.states) {
+          const st = this.getStateID(stateKey);
+          if (!st) continue;
+          for (const item of st.effectCollection) {
+            if (item.effectKey === ekey) st.effectCollection.delete(item);
+          }
+        }
+      }
+    }
+    for (const ekey of toDeleteEffect) this.effectCollection.delete(ekey);
+
+    this.componentCollection.delete(key);
+  }
+
+  _enableDomObserver() {
+    if (this._domObserver) return;
+
+    this._domObserver = new MutationObserver((mutations) => {
+      // подавляем реакцию на внутренние патчи MC (это главный выигрыш по нагрузке)
+      if (this._domObserverSuppress > 0) return;
+
+      for (const m of mutations) {
+        // added
+        for (const n of m.addedNodes || []) {
+          if (n && n.nodeType === 1) this._obsAddedRoots.add(n);
+        }
+        // removed
+        for (const n of m.removedNodes || []) {
+          if (n && n.nodeType === 1) this._obsRemovedRoots.add(n);
+        }
+      }
+
+    if (!this._obsFlushScheduled && (this._obsAddedRoots.size || this._obsRemovedRoots.size)) {
+      this._obsFlushScheduled = true;
+      queueMicrotask(() => {
+        try {
+          this._flushDomObserverQueues();
+        } finally {
+          this._obsFlushScheduled = false;
+        }
+      });
+    }
+  });
+
+  this._domObserver.observe(document.documentElement, { childList: true, subtree: true });
+}
+
+_flushDomObserverQueues() {
+    // 1) CONNECT: обработать добавленные узлы (mount)
+    if (this._obsAddedRoots.size) {
+      const added = Array.from(this._obsAddedRoots);
+      this._obsAddedRoots.clear();
+
+      for (const root of added) {
+        if (!root || !root.isConnected) continue;
+
+        // важный фильтр: не трогать чужие узлы
+        // если root сам MC или содержит MC — reconnect
+        if (root.instanceMC) {
+          this.engine.diff.patch.reconnectingVDOM(root);
+          continue;
+        }
+
+        // дешево: искать только если есть смысл
+        // (TreeWalker с FILTER_SKIP почти ничего не делает)
+        const walker = document.createTreeWalker(
+          root,
+          NodeFilter.SHOW_ELEMENT,
+          { acceptNode: (node) => node.instanceMC ? NodeFilter.FILTER_ACCEPT : NodeFilter.FILTER_SKIP }
+        );
+        if (walker.nextNode()) {
+          this.engine.diff.patch.reconnectingVDOM(root);
+        }
+      }
+    }
+
+    // 2) DISCONNECT: обработать удалённые узлы (unmount/cleanup)
+    if (this._obsRemovedRoots.size) {
+      const removed = Array.from(this._obsRemovedRoots);
+      this._obsRemovedRoots.clear();
+
+      // microtask уже прошёл, поэтому move (remove->add) обычно вернулся и будет isConnected=true
+      for (const root of removed) {
+        if (!root || root.isConnected) continue; // move or already reattached
+
+        // чистим VDOM только для поддерева root
+        this._cleanupRemovedSubtree(root);
+      }
+    }
+  }
+
+  _cleanupRemovedSubtree(root) {
+    const fnKeys = new Set();
+    const compKeys = new Set();
+
+    const collect = (el) => {
+      if (!el || !el.instanceMC) return;
+      const id = el.instanceMC;
+
+      if (el.instanceMCtype === "fn") {
+        const key = this.fcIdsCollection.get(id);
+        if (key) fnKeys.add(key);
+      } else if (el.instanceMCtype === "mc_component") {
+        const key = this.componentIdsCollection.get(id);
+        if (key) compKeys.add(key);
+      }
+    };
+
+    // сам root
+    if (root.nodeType === 1) collect(root);
+
+    // потомки
+    const walker = document.createTreeWalker(
+      root,
+      NodeFilter.SHOW_ELEMENT,
+      { acceptNode: (node) => node.instanceMC ? NodeFilter.FILTER_ACCEPT : NodeFilter.FILTER_SKIP }
+    );
+
+    let node = walker.nextNode();
+    while (node) {
+      collect(node);
+      node = walker.nextNode();
+    }
+
+    // чистим: компоненты и fn независимо
+    for (const key of fnKeys) this._cleanupFunctionContainerByKey(key);
+    for (const key of compKeys) this._cleanupComponentByKey(key);
   }
 
   setCurrentRenderingInstance(key) {
@@ -2515,24 +2688,6 @@ class MC {
             }
           }
         }
-
-        // v8 = Сейчас эффекты привязываются по инстансу рендера классового компонента, если он есть.
-        // Для функциональных контейнеров функционал не предусмотрен
-        // Если эффекты будут знать value.parent для функционального контейнера - можно организовать привязку по ним.
-        // Но осторожно, нужно не повредить механизм определения детей и привязок для классов!
-
-        // const toDeleteEffect = [];
-        // for (const [key, value] of this.effectCollection) {
-        //   if (value.parent === VDOM.key) {
-        //     value.unmountCaller();
-        //     toDeleteEffect.push(key);
-        //   }
-        // }
-
-        // for (const key of toDeleteEffect) {
-        //   this.effectCollection.delete(key);
-        // }
-        // continue - v8 ?
 
         this.fcCollection.delete(key);
       }
