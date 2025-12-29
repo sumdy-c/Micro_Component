@@ -1,4 +1,4 @@
-// v7.5
+//TODO v8 = batched render / microtask queue;
 class MCState {
   /**
    * id состояния
@@ -102,7 +102,6 @@ class MCState {
   set(newValue) {
     // 1) Быстрые проверки
     if (newValue === this.value) {
-      // строгое равенство ссылок — считаем, что нет изменений (сохраняем поведение оригинала)
       return;
     }
 
@@ -176,55 +175,61 @@ class MCState {
       return;
     }
 
-      if (this.passport) {
-        this.value = newValue;
+    if (this.passport) {
+      this.value = newValue;
 
-        const MCInstance = _mc_instance_restore_object.instance;
+      const MCInstance = _mc_instance_restore_object.instance;
 
-        // чтобы последний set стал последним в очереди
-        MCInstance.listPendingRedrawRequests.delete(this.id);
-        MCInstance.listPendingRedrawRequests.add(this.id);
+      // чтобы последний set стал последним в очереди
+      MCInstance.listPendingRedrawRequests.delete(this.id);
+      MCInstance.listPendingRedrawRequests.add(this.id);
 
-        if (!MCInstance._batchUpdateScheduled) {
-          MCInstance._batchUpdateScheduled = true;
+      if (!MCInstance._batchUpdateScheduled) {
+        MCInstance._batchUpdateScheduled = true;
 
-          queueMicrotask(() => {
-            const MCInstance = _mc_instance_restore_object.instance;
+        queueMicrotask(() => {
+          const MCInstance = _mc_instance_restore_object.instance;
+          
+          const runFlush = () => {
+            const ids = Array.from(MCInstance.listPendingRedrawRequests);
+            MCInstance.listPendingRedrawRequests.clear();
 
-            const runFlush = () => {
-              const ids = Array.from(MCInstance.listPendingRedrawRequests);
-              MCInstance.listPendingRedrawRequests.clear();
-
-              if (!ids.length) {
-                MCInstance._batchUpdateScheduled = false;
-                return;
-              }
-
-              MCInstance._batching = true;
-
-              for (let i = 0; i < ids.length; i++) {
-                const st = MCInstance.getStateID(ids[i]);
-                if (!st?.passport) continue;
-
-                if (i === ids.length - 1) MCInstance._batching = false;
-                st.passport.value = st.value;
-              }
-
-              MCInstance._batching = false;
-
-              // ✅ если во время flush добавились новые set'ы (как у тебя в effect) — прогоняем ещё раз
-              if (MCInstance.listPendingRedrawRequests.size) {
-                queueMicrotask(runFlush);
-                return;
-              }
-
+            if (!ids.length) {
               MCInstance._batchUpdateScheduled = false;
-            };
+              return;
+            }
 
-            runFlush();
-          });
-        }
+            MCInstance._batching = true;
+
+            for (let i = 0; i < ids.length; i++) {
+              const st = MCInstance.getStateID(ids[i]);
+
+              if (!st?.passport) { 
+                continue;
+              }
+
+              if (i === ids.length - 1) {
+                MCInstance._batching = false;
+              }
+
+              st.passport.value = st.value;
+            }
+
+            MCInstance._batching = false;
+
+            // ✅ если во время flush добавились новые set'ы (как у тебя в effect) — прогоняем ещё раз
+            if (MCInstance.listPendingRedrawRequests.size) {
+              queueMicrotask(runFlush);
+              return;
+            }
+
+            MCInstance._batchUpdateScheduled = false;
+          };
+
+          runFlush();
+        });
       }
+    }
   }
 
   /**
@@ -232,13 +237,6 @@ class MCState {
    */
   get() {
     return MCState.deepClone(this.value);
-  }
-
-  /**
-   * Форсирует отрисовку для приходящего компонента, без обновления значения его состояния
-   */
-  initial() {
-    this.passport.value = this.value;
   }
 
   /**
@@ -580,7 +578,9 @@ class MCEngine {
         target[prop] = value;
 
         let instance = this.mc;
-        if (instance.constructor.name !== "MC") instance = instance.mc;
+        if (instance.constructor.name !== "MC") {
+          instance = instance.mc;
+        }
 
         if (instance.getCurrentRenderingInstance()) {
           instance.listPendingRedrawRequests.add(state.id);
@@ -673,23 +673,21 @@ class MCEngine {
       this.jqToHtml(JQ_CONTAINER) ?? new MC_Element().createEmptyElement();
     NEW_HTML.instanceMC = VDOM.id;
     NEW_HTML.instanceMCtype = "mc_component";
+    const prevHTML = VDOM.HTML;
+
     VDOM.HTML = this.diff.start(VDOM.HTML, NEW_HTML);
 
-    // Создаём проход на отложенныe вызовы
-    if (this.mc.listPendingRedrawRequests.size) {
-      this.mc.listPendingRedrawRequests.forEach((stateId) => {
-        const state = this.mc.getStateID(stateId);
-        if (state.passport) {
-          state.passport.value = state.value;
-        }
-      });
-
-      this.mc.listPendingRedrawRequests.clear();
+    if (VDOM._mountedCalled && VDOM.HTML?.isConnected) {
+      if (typeof VDOM.updated === "function") {
+        VDOM.updated.call(VDOM.component, prevHTML, VDOM.HTML, VDOM);
+      } else if (typeof VDOM.component.updated === "function") {
+        VDOM.component.updated(VDOM.HTML, VDOM, prevHTML);
+      }
     }
   }
 
   /**
-   * Обновить ссылку на компонент для дочернего VDOM
+   * Обновить ссылку на компонент для дочернего VDOMпроход на отложенныe вызовы
    */
   rerender(VDOM, type = "fn") {
     let NEW_HTML = null;
@@ -770,12 +768,8 @@ class MCEngine {
 
     state.fcCollection.forEach((item) => {
       const virtual = mc.fcCollection.get(item.effectKey);
-      const value = virtual.states.get(state.id);
-
-      if (value !== state.value) {
-        virtual.states.set(state.id, state.value);
-        this.diffing(virtual);
-      }
+      virtual.states.set(state.id, state.value);
+      this.diffing(virtual);
     });
   }
 
@@ -786,12 +780,9 @@ class MCEngine {
 
     state.virtualCollection.forEach((item) => {
       const virtual = mc.componentCollection.get(item.effectKey);
-      const value = virtual.states.get(state.id);
 
-      if (value !== state.value) {
-        virtual.states.set(state.id, state.value);
-        this.diffingComponent(virtual);
-      }
+      virtual.states.set(state.id, state.value);
+      this.diffingComponent(virtual);
     });
   }
 
@@ -802,20 +793,18 @@ class MCEngine {
 
     state.effectCollection.forEach((item) => {
       const effect = mc.effectCollection.get(item.effectKey);
-      const value = effect.states.get(state.id);
 
-      if (value !== state.value) {
-        effect.states.set(state.id, state.value);
+      effect.states.set(state.id, state.value);
 
-        const unmountCallFunction = effect.run(
-          this.getArrayValuesStates(effect),
-          effect.options
-        );
+      const unmountCallFunction = effect.run(
+        this.getArrayValuesStates(effect),
+        effect.options
+      );
 
-        if (unmountCallFunction) {
-          effect.unmountCaller = unmountCallFunction;
-        }
+      if (unmountCallFunction) {
+        effect.unmountCaller = unmountCallFunction;
       }
+      
     });
   }
 
@@ -1279,6 +1268,38 @@ class MasterDiff {
         return { type: "REPLACE", node: newNode, ctx: context };
       }
 
+      if (newNode.__mc_ref_cb) {
+        oldNode.__mc_ref_cb = newNode.__mc_ref_cb;
+      } else if (oldNode.__mc_ref_cb) {
+        delete oldNode.__mc_ref_cb;
+      }
+
+      if (newNode.__mc_ref_obj) { 
+        oldNode.__mc_ref_obj = newNode.__mc_ref_obj;
+      } else if (oldNode.__mc_ref_obj) { 
+        delete oldNode.__mc_ref_obj;
+      }
+
+      // ✅ Переносим флаг host на реальный DOM (oldNode)
+      if (newNode.__mc_host) {
+        oldNode.__mc_host = true;
+      } else if (oldNode.__mc_host) { 
+        delete oldNode.__mc_host;
+      }
+
+      // ✅ (если у тебя уже есть перенос ref — оставь, иначе добавь)
+      if (newNode.__mc_ref_cb) { 
+        oldNode.__mc_ref_cb = newNode.__mc_ref_cb;
+      } else if (oldNode.__mc_ref_cb) {
+        delete oldNode.__mc_ref_cb;
+      }
+
+      if (newNode.__mc_ref_obj) {
+        oldNode.__mc_ref_obj = newNode.__mc_ref_obj;
+      } else if (oldNode.__mc_ref_obj) { 
+        delete oldNode.__mc_ref_obj;
+      }
+
       // Сравнение атрибутов, стилей, классов, событий
       const attrPatch = this.attrDiff.diffAttributes(oldNode, newNode, context);
       const stylePatch = this.styleDiff.diffStyles(oldNode, newNode, context);
@@ -1292,7 +1313,9 @@ class MasterDiff {
       }
 
       // Дети
-      const childrenPatch = this.diffChildren(oldNode, newNode, context);
+      const childrenPatch = oldNode.__mc_host
+        ? { type: "NONE", ctx: context }
+        : this.diffChildren(oldNode, newNode, context);
 
       return {
         type: "UPDATE",
@@ -1367,52 +1390,66 @@ class PatchMaster {
   }
 
   reconnectingVDOM(rootNode) {
+    let rootMC = this.mc;
+    if (rootMC && rootMC.constructor && rootMC.constructor.name !== "MC") {
+      rootMC = rootMC.mc;
+    }
+
+    // ✅ список кандидатов на mounted (в Set чтобы без дублей)
+    const toMount = new Set();
+
     const processEl = (el) => {
-      if (!el.instanceMC) {
-        return;
+      if (!el || el.nodeType !== 1) return;
+
+      // 1) ✅ ref сначала
+      if (typeof el.__mc_ref_cb === "function") {
+        try { el.__mc_ref_cb(el); } catch (e) { console.error(e); }
       }
+      if (el.__mc_ref_obj && typeof el.__mc_ref_obj === "object") {
+        el.__mc_ref_obj.current = el;
+      }
+
+      // 2) instanceMC (fn / class component)
+      if (!el.instanceMC) return;
 
       if (el.instanceMCtype === "fn") {
         const key = el.instanceMC;
-        const vdom = this.mc.fcCollection.get(this.mc.fcIdsCollection.get(key));
-
-        if (vdom) {
-          vdom.HTML = el;
-        }
+        const vdom = rootMC.fcCollection.get(rootMC.fcIdsCollection.get(key));
+        if (vdom) vdom.HTML = el;
+        return;
       }
 
       if (el.instanceMCtype === "mc_component") {
         const key = el.instanceMC;
+        const vdom = rootMC.componentCollection.get(rootMC.componentIdsCollection.get(key));
 
-        if (this.mc.constructor.name !== "MC") {
-          this.mc = this.mc.mc;
-        }
-
-        const vdom = this.mc.componentCollection.get(
-          this.mc.componentIdsCollection.get(key)
-        );
-
-        if(vdom) {
+        if (vdom) {
           vdom.HTML = el;
 
-          if(vdom.HTML.isConnected && !vdom._mountedCalled) {
-            vdom.mounted();
-            vdom._mountedCalled = true;
+          // ✅ mounted НЕ здесь — только собираем
+          if (el.isConnected && !vdom._mountedCalled) {
+            toMount.add(vdom);
           }
         }
       }
     };
 
-    if (rootNode.nodeType === 1 && rootNode.instanceMC) {
+    // root
+    if (
+      rootNode &&
+      rootNode.nodeType === 1 &&
+      (rootNode.instanceMC || rootNode.__mc_ref_cb || rootNode.__mc_ref_obj)
+    ) {
       processEl(rootNode);
     }
 
+    // walk subtree: принимаем и instanceMC и ref-ноды
     const walker = document.createTreeWalker(
       rootNode,
       NodeFilter.SHOW_ELEMENT,
       {
         acceptNode(node) {
-          return node.instanceMC
+          return (node.instanceMC || node.__mc_ref_cb || node.__mc_ref_obj)
             ? NodeFilter.FILTER_ACCEPT
             : NodeFilter.FILTER_SKIP;
         },
@@ -1425,6 +1462,19 @@ class PatchMaster {
       processEl(node);
       node = walker.nextNode();
     }
+
+    toMount.forEach((vdom) => {
+      if (!vdom || vdom._mountedCalled) return;
+      if (!vdom.HTML || !vdom.HTML.isConnected) return;
+
+      try {
+        vdom.mounted.call(vdom.component, vdom.HTML, vdom);
+      } catch (e) {
+        console.error("MC mounted error:", e);
+      }
+
+      vdom._mountedCalled = true;
+    });
   }
 
   /**
@@ -1441,19 +1491,16 @@ class PatchMaster {
       case "ADD":
         if (domNode && domNode.parentNode) {
           domNode.parentNode.appendChild(patch.node);
-          // this.reconnectingVDOM(patch.node);
         }
         return patch.node;
       case "REMOVE":
         if (domNode && domNode.parentNode) {
           domNode.parentNode.removeChild(domNode);
-          // this.reconnectingVDOM(patch.node);
         }
         return null;
       case "REPLACE":
         if (domNode && domNode.parentNode) {
           domNode.parentNode.replaceChild(patch.node, domNode);
-          // this.reconnectingVDOM(patch.node);
           return patch.node;
         }
         return patch.node;
@@ -1497,8 +1544,6 @@ class PatchMaster {
         this.eventDiff.applyEvents(patch.eventPatch, domNode);
         // Дети
         this.applyPatch(patch.childrenPatch, domNode, context);
-
-        // this.reconnectingVDOM(domNode);
         return domNode;
       case "CHILDREN":
         this._applyChildren(patch.patches, domNode, context);
@@ -1520,7 +1565,6 @@ class PatchMaster {
       // ADD: append
       if (!child && patch && patch.type === "ADD") {
         domNode.appendChild(patch.node);
-        // this.reconnectingVDOM(patch.node);
         continue;
       }
 
@@ -1537,7 +1581,6 @@ class PatchMaster {
       // RECURSIVE
       if (child && patch) {
         this.applyPatch(patch, child, ctx);
-        // this.reconnectingVDOM(child);
       }
     }
     // Если новые дети длиннее старых — добавить недостающих
@@ -1545,7 +1588,6 @@ class PatchMaster {
       const patch = childPatches[i];
       if (patch && patch.type === "ADD") {
         domNode.appendChild(patch.node);
-        // this.reconnectingVDOM(patch.node);
       }
     }
   }
@@ -1573,22 +1615,23 @@ class MCDiff {
   }
 
   start(oldNode, newNode) {
-  const mc = this.patch.mc.constructor.name === "MC" ? this.patch.mc : this.patch.mc.mc;
+    const mc = this.patch.mc.constructor.name === "MC" ? this.patch.mc : this.patch.mc.mc;
 
-  try {
-    mc._domObserverSuppress++;
+    try {
+      mc._domObserverSuppress++;
 
-    const trace = this.master.diffNode(oldNode, newNode, { level: 0, path: "" });
-    const node = this.patch.applyPatch(trace, oldNode, { level: 0, path: "" });
+      const trace = this.master.diffNode(oldNode, newNode, { level: 0, path: "" });
+      const node = this.patch.applyPatch(trace, oldNode, { level: 0, path: "" });
 
-    // reconnect после полного патча
-    if (node) this.patch.reconnectingVDOM(node);
+      if (node) { 
+        this.patch.reconnectingVDOM(node);
+      }
 
-    return node;
-  } finally {
-    mc._domObserverSuppress--;
+      return node;
+    } finally {
+      mc._domObserverSuppress--;
+    }
   }
-}
 }
 
 class MC_Component {
@@ -1619,6 +1662,7 @@ class MC_Component {
     const virtualElement = {
       draw: instance.render,
       mounted: instance.mounted ? instance.mounted : () => {},
+      updated: instance.updated ? instance.updated : () => {}, 
       _mountedCalled: false,
       unmounted: instance.unmounted ? instance.unmounted : () => {},
       key: normalized.key,
@@ -2058,6 +2102,23 @@ class MC {
     return this.mc.createContext(key);
   }
 
+  static host(jqOrEl, cbOrRef) {
+    if (!jqOrEl) return jqOrEl;
+
+    const el = jqOrEl.jquery ? jqOrEl[0] : (jqOrEl.nodeType ? jqOrEl : jqOrEl[0]);
+    if (!el) return jqOrEl;
+
+    // помечаем как host
+    el.__mc_host = true;
+
+    // опционально — ref
+    if (cbOrRef !== undefined) {
+      return MC.ref(jqOrEl, cbOrRef);
+    }
+
+    return jqOrEl;
+  }
+
   /**
    * Получить стейт по ключу
    */
@@ -2094,6 +2155,32 @@ class MC {
       }
     });
     return context;
+  }
+
+  static createRef() {
+    return { current: null };
+  }
+
+  static ref(jqOrEl, cbOrRef) {
+    if (!jqOrEl) return jqOrEl;
+
+    const el = jqOrEl.jquery ? jqOrEl[0] : (jqOrEl.nodeType ? jqOrEl : jqOrEl[0]);
+    if (!el) return jqOrEl;
+
+    if (typeof cbOrRef === "function") {
+      el.__mc_ref_cb = cbOrRef;
+      // если раньше был object-ref — уберём
+      if (el.__mc_ref_obj) delete el.__mc_ref_obj;
+      return jqOrEl;
+    }
+
+    if (cbOrRef && typeof cbOrRef === "object") {
+      el.__mc_ref_obj = cbOrRef;
+      if (el.__mc_ref_cb) delete el.__mc_ref_cb;
+      return jqOrEl;
+    }
+
+    return jqOrEl;
   }
 
   scheduleCleanDeadVDOM() {
