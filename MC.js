@@ -181,33 +181,78 @@ class MCState {
 					const MCInstance = _mc_instance_restore_object.instance;
 
 					const runFlush = () => {
-						const ids = Array.from(MCInstance.listPendingRedrawRequests);
-						MCInstance.listPendingRedrawRequests.clear();
+						const pending = MCInstance.listPendingRedrawRequests;
+
+						let ids = [];
+						if (pending) {
+							ids = Array.from(pending);
+							pending.clear();
+						}
 
 						if (!ids.length) {
 							MCInstance._batchUpdateScheduled = false;
 							return;
 						}
 
+						const dirtyEffectKeys = new Set();
+
 						MCInstance._batching = true;
+						MCInstance._batchingEffects = true;
 
-						for (let i = 0; i < ids.length; i++) {
-							const st = MCInstance.getStateID(ids[i]);
+						try {
+							for (let i = 0; i < ids.length; i++) {
+								const st = MCInstance.getStateID(ids[i]);
 
-							if (!st?.passport) {
-								continue;
+								if (!st || !st.passport) {
+									continue;
+								}
+
+								// Собираем эффекты, которые зависят от этого state,
+								// и заранее обновляем effect.states, как это делал бы runEffectWork
+								if (st.effectCollection && st.effectCollection.size) {
+									st.effectCollection.forEach((item) => {
+										const eff = MCInstance.effectCollection.get(item.effectKey);
+										if (!eff) {
+											return;
+										}
+
+										const prev = eff.states.get(st.id);
+										if (prev !== st.value) {
+											eff.states.set(st.id, st.value);
+											dirtyEffectKeys.add(item.effectKey);
+										}
+									});
+								}
+
+								// Последний state в батче — единственный, который реально вызовет render()
+								if (i === ids.length - 1) {
+									MCInstance._batching = false;
+								}
+
+								st.passport.value = st.value;
 							}
-
-							if (i === ids.length - 1) {
-								MCInstance._batching = false;
-							}
-
-							st.passport.value = st.value;
+						} finally {
+							MCInstance._batching = false;
+							MCInstance._batchingEffects = false;
 						}
 
-						MCInstance._batching = false;
+						dirtyEffectKeys.forEach((effectKey) => {
+							const eff = MCInstance.effectCollection.get(effectKey);
+							if (!eff) {
+								return;
+							}
 
-						// ✅ если во время flush добавились новые set'ы (как у тебя в effect) — прогоняем ещё раз
+							const unmountCallFunction = eff.run(
+								MCInstance.engine.getArrayValuesStates(eff),
+								eff.options
+							);
+
+							if (unmountCallFunction) {
+								eff.unmountCaller = unmountCallFunction;
+							}
+						});
+
+						// Если во время flush/эффектов появились новые set'ы — прогоняем ещё раз
 						if (MCInstance.listPendingRedrawRequests.size) {
 							queueMicrotask(runFlush);
 							return;
@@ -671,15 +716,25 @@ class MCEngine {
 		const hasVC = Boolean(state.virtualCollection.size);
 		const hasFX = Boolean(state.effectCollection.size);
 
-		if (hasFC) engine.renderFunctionContainer(state, mc);
-		if (hasVC) engine.renderComponentWork(state, mc);
-		if (hasFX) engine.runEffectWork(state, mc);
+		let root = mc;
+		if (root && root.constructor && root.constructor.name !== 'MC') {
+			root = root.mc;
+		}
+		const isBatchingEffects = Boolean(root && root._batchingEffects);
 
-		if (mc.constructor.name !== 'MC') {
-			mc = mc.mc;
+		if (hasFC) {
+			engine.renderFunctionContainer(state, mc);
+		}
+		if (hasVC) {
+			engine.renderComponentWork(state, mc);
+		}
+		if (hasFX && !isBatchingEffects) {
+			engine.runEffectWork(state, mc);
 		}
 
-		mc.scheduleCleanDeadVDOM();
+		if (root && root.scheduleCleanDeadVDOM) {
+			root.scheduleCleanDeadVDOM();
+		}
 	}
 
 	/**
@@ -2232,12 +2287,12 @@ class MC {
 	_cleanupComponentByKey(key, force = false) {
 		const VDOM = this.componentCollection.get(key);
 		if (!VDOM) {
-      return;
-    }
+			return;
+		}
 
 		if (!force && VDOM.HTML && VDOM.HTML.isConnected) {
-      return;
-    }
+			return;
+		}
 
 		// unmounted
 		try {
