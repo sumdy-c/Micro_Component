@@ -1,4 +1,7 @@
+/// <reference types="./types/mc.d.ts" />
 //TODO v8 = batched render / microtask queue;
+
+//MCv7.2
 class MCState {
 	/**
 	 * id состояния
@@ -1395,19 +1398,16 @@ class PatchMaster {
 	 * Сравнение атрибутов
 	 */
 	attrDiff;
+
 	/**
 	 * Сравнение стилей
 	 */
 	styleDiff;
+
 	/**
 	 * Сравнение классов
 	 */
 	classDiff;
-
-	/**
-	 * Сервисные иньекции в DOM
-	 */
-	serviceDiff;
 
 	/**
 	 * Сравнение событий
@@ -1427,6 +1427,13 @@ class PatchMaster {
 		this.mc = mc;
 	}
 
+	/**
+	 * ✅ “mount-like” refs + корректный mount для компонентов после переподключения VDOM.
+	 * Главное: ref-callback вызывается только:
+	 *  - когда узел реально смонтирован (el.isConnected)
+	 *  - один раз на жизнь DOM-узла, либо если поменялась функция ref-callback
+	 * И ref-object выставляется аналогично.
+	 */
 	reconnectingVDOM(rootNode) {
 		let rootMC = this.mc;
 		if (rootMC && rootMC.constructor && rootMC.constructor.name !== 'MC') {
@@ -1439,19 +1446,97 @@ class PatchMaster {
 		const processEl = (el) => {
 			if (!el || el.nodeType !== 1) return;
 
-			// 1) ✅ ref сначала
-			if (typeof el.__mc_ref_cb === 'function') {
+			// ------------------------------------------------------------------
+			// 1) ✅ REF mount-like
+			// ------------------------------------------------------------------
+			const isConnected = !!el.isConnected;
+
+			// a) ref-callback
+			const cb = typeof el.__mc_ref_cb === 'function' ? el.__mc_ref_cb : null;
+			const lastCb = typeof el.__mc_ref_last_cb === 'function' ? el.__mc_ref_last_cb : null;
+
+			// если ref сняли (раньше был, теперь нет) — detach один раз
+			if (!cb && lastCb && el.__mc_ref_mounted) {
 				try {
-					el.__mc_ref_cb(el);
+					lastCb(null);
 				} catch (e) {
 					console.error(e);
 				}
-			}
-			if (el.__mc_ref_obj && typeof el.__mc_ref_obj === 'object') {
-				el.__mc_ref_obj.current = el;
+				el.__mc_ref_mounted = false;
+				el.__mc_ref_last_cb = null;
 			}
 
+			// если ref есть — вызвать только при mount и только один раз, либо если cb изменился
+			if (cb && isConnected) {
+				const changed = lastCb !== cb;
+				const needCall = !el.__mc_ref_mounted || changed;
+
+				if (needCall) {
+					// если callback поменялся — корректно “снять” старый
+					if (el.__mc_ref_mounted && lastCb && lastCb !== cb) {
+						try {
+							lastCb(null);
+						} catch (e) {
+							console.error(e);
+						}
+					}
+
+					try {
+						cb(el);
+					} catch (e) {
+						console.error(e);
+					}
+
+					el.__mc_ref_mounted = true;
+					el.__mc_ref_last_cb = cb;
+				}
+			}
+
+			// b) ref-object
+			const obj = el.__mc_ref_obj && typeof el.__mc_ref_obj === 'object' ? el.__mc_ref_obj : null;
+			const lastObj =
+				el.__mc_ref_last_obj && typeof el.__mc_ref_last_obj === 'object'
+					? el.__mc_ref_last_obj
+					: null;
+
+			if (!obj && lastObj && el.__mc_ref_obj_mounted) {
+				try {
+					lastObj.current = null;
+				} catch (e) {
+					console.error(e);
+				}
+				el.__mc_ref_obj_mounted = false;
+				el.__mc_ref_last_obj = null;
+			}
+
+			if (obj && isConnected) {
+				const changedObj = lastObj !== obj;
+				const needSet = !el.__mc_ref_obj_mounted || changedObj;
+
+				if (needSet) {
+					// если объект поменялся — старый очистить
+					if (el.__mc_ref_obj_mounted && lastObj && lastObj !== obj) {
+						try {
+							lastObj.current = null;
+						} catch (e) {
+							console.error(e);
+						}
+					}
+
+					try {
+						obj.current = el;
+					} catch (e) {
+						console.error(e);
+					}
+
+					el.__mc_ref_obj_mounted = true;
+					el.__mc_ref_last_obj = obj;
+				}
+			}
+
+			// ------------------------------------------------------------------
 			// 2) instanceMC (fn / class component)
+			// ------------------------------------------------------------------
 			if (!el.instanceMC) return;
 
 			if (el.instanceMCtype === 'fn') {
@@ -1480,18 +1565,28 @@ class PatchMaster {
 		if (
 			rootNode &&
 			rootNode.nodeType === 1 &&
-			(rootNode.instanceMC || rootNode.__mc_ref_cb || rootNode.__mc_ref_obj)
+			(
+				rootNode.instanceMC ||
+				rootNode.__mc_ref_cb ||
+				rootNode.__mc_ref_obj ||
+				rootNode.__mc_ref_last_cb ||
+				rootNode.__mc_ref_last_obj
+			)
 		) {
 			processEl(rootNode);
 		}
 
-		// walk subtree: принимаем и instanceMC и ref-ноды
+		// walk subtree: принимаем и instanceMC и ref-ноды (включая “ref был, но сняли”)
 		const walker = document.createTreeWalker(
 			rootNode,
 			NodeFilter.SHOW_ELEMENT,
 			{
 				acceptNode(node) {
-					return node.instanceMC || node.__mc_ref_cb || node.__mc_ref_obj
+					return node.instanceMC ||
+						node.__mc_ref_cb ||
+						node.__mc_ref_obj ||
+						node.__mc_ref_last_cb ||
+						node.__mc_ref_last_obj
 						? NodeFilter.FILTER_ACCEPT
 						: NodeFilter.FILTER_SKIP;
 				},
@@ -1505,12 +1600,19 @@ class PatchMaster {
 			node = walker.nextNode();
 		}
 
+		// ✅ mounted вызов отдельно, после reconnection
 		toMount.forEach((vdom) => {
 			if (!vdom || vdom._mountedCalled) return;
 			if (!vdom.HTML || !vdom.HTML.isConnected) return;
 
 			try {
-				vdom.mounted.call(vdom.component, vdom.HTML, vdom);
+				// (оставляю твою текущую сигнатуру вызова как есть)
+				vdom.mounted.call(
+					vdom.component,
+					rootMC.engine.formationStates(vdom),
+					vdom.normalized.props,
+					vdom
+				);
 			} catch (e) {
 				console.error('MC mounted error:', e);
 			}
@@ -1520,7 +1622,90 @@ class PatchMaster {
 	}
 
 	/**
+	 * ✅ Ref detach для узла (как React: cb(null), obj.current=null),
+	 * плюс сброс маркеров mount-like.
+	 */
+	_detachRefsOnEl(el) {
+		if (!el || el.nodeType !== 1) return;
+
+		// callback
+		const lastCb = typeof el.__mc_ref_last_cb === 'function' ? el.__mc_ref_last_cb : null;
+		const cb = typeof el.__mc_ref_cb === 'function' ? el.__mc_ref_cb : null;
+
+		// вызываем null только если ранее реально “монтировали”
+		if (el.__mc_ref_mounted) {
+			const fn = lastCb || cb;
+			if (typeof fn === 'function') {
+				try {
+					fn(null);
+				} catch (e) {
+					console.error(e);
+				}
+			}
+		}
+
+		// object
+		const lastObj =
+			el.__mc_ref_last_obj && typeof el.__mc_ref_last_obj === 'object'
+				? el.__mc_ref_last_obj
+				: null;
+		const obj = el.__mc_ref_obj && typeof el.__mc_ref_obj === 'object' ? el.__mc_ref_obj : null;
+
+		if (el.__mc_ref_obj_mounted) {
+			const target = lastObj || obj;
+			try {
+				if (target) target.current = null;
+			} catch (e) {
+				console.error(e);
+			}
+		}
+
+		// сброс маркеров, чтобы узел не “помнил” прошлую жизнь
+		el.__mc_ref_mounted = false;
+		el.__mc_ref_obj_mounted = false;
+		el.__mc_ref_last_cb = null;
+		el.__mc_ref_last_obj = null;
+	}
+
+	/**
+	 * ✅ Ref detach по всему поддереву.
+	 * Важно вызывать перед REMOVE/REPLACE, потому что observer может быть подавлен.
+	 */
+	_detachRefsDeep(root) {
+		if (!root) return;
+
+		// если корень элемент — обработать
+		if (root.nodeType === 1) {
+			this._detachRefsOnEl(root);
+		}
+
+		// пройти детей-элементов, где вообще есть ref / last_ref
+		const walker = document.createTreeWalker(
+			root,
+			NodeFilter.SHOW_ELEMENT,
+			{
+				acceptNode(node) {
+					return node.__mc_ref_cb ||
+						node.__mc_ref_obj ||
+						node.__mc_ref_last_cb ||
+						node.__mc_ref_last_obj
+						? NodeFilter.FILTER_ACCEPT
+						: NodeFilter.FILTER_SKIP;
+				},
+			},
+			false
+		);
+
+		let n = walker.nextNode();
+		while (n) {
+			this._detachRefsOnEl(n);
+			n = walker.nextNode();
+		}
+	}
+
+	/**
 	 * Применяет патч к DOM-узлу.
+	 * ✅ В REMOVE/REPLACE (+ replace в TEXT/COMMENT) делаем ref-detach перед физическим удалением.
 	 */
 	applyPatch(patch, domNode, ctx) {
 		if (!patch) {
@@ -1535,43 +1720,70 @@ class PatchMaster {
 					domNode.parentNode.appendChild(patch.node);
 				}
 				return patch.node;
+
 			case 'REMOVE':
-				if (domNode && domNode.parentNode) {
-					domNode.parentNode.removeChild(domNode);
+				if (domNode) {
+					// ✅ detach refs before removal
+					this._detachRefsDeep(domNode);
+
+					if (domNode.parentNode) {
+						domNode.parentNode.removeChild(domNode);
+					}
 				}
 				return null;
+
 			case 'REPLACE':
-				if (domNode && domNode.parentNode) {
-					domNode.parentNode.replaceChild(patch.node, domNode);
-					return patch.node;
+				if (domNode) {
+					// ✅ detach refs before replace
+					this._detachRefsDeep(domNode);
+
+					if (domNode.parentNode) {
+						domNode.parentNode.replaceChild(patch.node, domNode);
+						return patch.node;
+					}
 				}
 				return patch.node;
+
 			case 'TEXT': {
 				if (domNode && domNode.nodeType === Node.TEXT_NODE) {
 					domNode.textContent = patch.text;
 					return domNode;
 				}
 
+				// domNode заменяем — значит старый узел уходит => detach refs
+				if (domNode) {
+					this._detachRefsDeep(domNode);
+				}
+
 				if (domNode && domNode.parentNode) {
 					const textNode = document.createTextNode(patch.text);
-					domNode.parentNode.replaceChild(textNode, domNode); // <-- вот так
+					domNode.parentNode.replaceChild(textNode, domNode);
 					return textNode;
 				}
 
 				return document.createTextNode(patch.text);
 			}
+
 			case 'COMMENT': {
 				if (domNode && domNode.nodeType === Node.COMMENT_NODE) {
 					domNode.nodeValue = patch.text;
 					return domNode;
 				}
+
+				// domNode заменяем — значит старый узел уходит => detach refs
+				if (domNode) {
+					this._detachRefsDeep(domNode);
+				}
+
 				if (domNode && domNode.parentNode) {
 					const comment = document.createComment(patch.text);
 					domNode.parentNode.replaceChild(comment, domNode);
 					return comment;
 				}
+
 				return document.createComment(patch.text);
 			}
+
 			case 'UPDATE':
 				// Атрибуты
 				this.attrDiff.applyAttributes(patch.attrPatch, domNode);
@@ -1584,11 +1796,14 @@ class PatchMaster {
 				// Дети
 				this.applyPatch(patch.childrenPatch, domNode, context);
 				return domNode;
+
 			case 'CHILDREN':
 				this._applyChildren(patch.patches, domNode, context);
 				return domNode;
+
 			case 'NONE':
 				return domNode;
+
 			default:
 				return domNode;
 		}
@@ -1596,11 +1811,13 @@ class PatchMaster {
 
 	/**
 	 * Rекурсивное применение патчей к детям.
+	 * ✅ При REMOVE ребёнка делаем ref-detach перед removeChild.
 	 */
 	_applyChildren(childPatches, domNode, ctx) {
 		for (let i = 0; i < childPatches.length; i++) {
 			const patch = childPatches[i];
 			const child = domNode.childNodes[i];
+
 			// ADD: append
 			if (!child && patch && patch.type === 'ADD') {
 				domNode.appendChild(patch.node);
@@ -1609,6 +1826,9 @@ class PatchMaster {
 
 			// REMOVE
 			if (child && patch && patch.type === 'REMOVE') {
+				// ✅ detach refs before removal
+				this._detachRefsDeep(child);
+
 				// при удалении ребёнка из DOM он сместится. Без отката пропустит обработку
 				--i;
 				domNode.removeChild(child);
@@ -1617,11 +1837,13 @@ class PatchMaster {
 
 			// EMPTY SKIP
 			if (!child && patch) continue;
+
 			// RECURSIVE
 			if (child && patch) {
 				this.applyPatch(patch, child, ctx);
 			}
 		}
+
 		// Если новые дети длиннее старых — добавить недостающих
 		for (let i = domNode.childNodes.length; i < childPatches.length; i++) {
 			const patch = childPatches[i];
@@ -2175,10 +2397,6 @@ class MC {
 		return context;
 	}
 
-	static createRef() {
-		return { current: null };
-	}
-
 	static ref(jqOrEl, cbOrRef) {
 		if (!jqOrEl) return jqOrEl;
 
@@ -2187,7 +2405,6 @@ class MC {
 
 		if (typeof cbOrRef === 'function') {
 			el.__mc_ref_cb = cbOrRef;
-			// если раньше был object-ref — уберём
 			if (el.__mc_ref_obj) delete el.__mc_ref_obj;
 			return jqOrEl;
 		}

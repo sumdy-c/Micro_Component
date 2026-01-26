@@ -1,40 +1,186 @@
 {
-    "Create MC Component": {
-        "prefix": "mc_comp",
-        "body": [
-            "class ${1:component} extends MC {",
-            "    constructor() {",
-            "        super();",
-            "    }",
-            "",
-            "    render() {",
-            "        return $('<div>');",
-            "    }",
-            "}"
-        ],
-        "description": "Create a class extending MC with render method"
-    },
-    "Use State (MC.uState)": {
-        "prefix": "mc_us",
-        "body": [
-            "const state = MC.uState(false, '${1:key}');"
-        ],
-        "description": "Initialize a state with MC.uState"
-    },
-    "Create Context (MC.createContext)": {
-        "prefix": "mc_cxt",
-        "body": [
-            "const context = MC.createContext('${1:key}');"
-        ],
-        "description": "Create a context with MC.createContext"
-    },
-    "MC Function (MC)": {
-        "prefix": "mc_f",
-        "body": [
-            "$.MC((state, reflect) => {",
-            "    ${1:// Your code here}",
-            "}, []);"
-        ],
-        "description": "Create an MC function with $.MC"
-    }
+  "Создать компонент MC (минимальный)": {
+    "prefix": "mc_comp",
+    "body": [
+      "class ${1:Component} extends MC {",
+      "    constructor() {",
+      "        super();",
+      "    }",
+      "",
+      "    render() {",
+      "        return $('<div>');",
+      "    }",
+      "}"
+    ],
+    "description": "mc_comp — минимальный class-компонент MC"
+  },
+
+  "Создать компонент MC (states + props)": {
+    "prefix": "mc_comp_r",
+    "body": [
+      "class ${1:Component} extends MC {",
+      "    constructor() {",
+      "        super();",
+      "        ${2:// this.countState = super.state(0);}",
+      "    }",
+      "",
+      "    render(states, props) {",
+      "        ${3:// const [count, setCount] = states.countState;}",
+      "        return $('<div>');",
+      "    }",
+      "}"
+    ],
+    "description": "mc_comp_r — компонент с заготовкой под states/props"
+  },
+
+  "Создать state внутри компонента (this.* = state)": {
+    "prefix": "mc_state",
+    "body": [
+      "this.${1:nameState} = super.state(${2:0});"
+    ],
+    "description": "mc_state — создать локальное состояние в компоненте"
+  },
+
+  "Деструктурировать state из states.*": {
+    "prefix": "mc_state_use",
+    "body": [
+      "const [${1:value}, ${2:setValue}] = states.${3:nameState};"
+    ],
+    "description": "mc_state_use — const [value, setValue] = states.someState"
+  },
+
+  "Создать глобальный state (MC.uState)": {
+    "prefix": "mc_us",
+    "body": [
+      "const ${1:state} = MC.uState(${2:value}, 'mc_global-state-${3:key}')"
+    ],
+    "description": "mc_us — MC.uState(value, 'mc_global-state...')"
+  },
+
+  "Создать глобальный state (MC.uState) с RANDOM_HEX ключом": {
+    "prefix": "mc_us_rnd",
+    "body": [
+      "const ${1:state} = MC.uState(${2:value}, 'mc_global-state-${RANDOM_HEX}')"
+    ],
+    "description": "mc_us_rnd — MC.uState(value, 'mc_global-state-'+RANDOM_HEX)"
+  },
+
+  "Создать context (MC.uContext)": {
+    "prefix": "mc_ctx",
+    "body": [
+      "const ${1:ctx} = MC.uContext('${2:key}');"
+    ],
+    "description": "mc_ctx — создать/получить глобальный контекст"
+  },
+
+  "Вставить компонент ($.MC)": {
+    "prefix": "mc_use",
+    "body": [
+      "$.MC(${1:Component}, { ${2} }${3:, '${4:key}'})"
+    ],
+    "description": "mc_use — отрендерить class-компонент через $.MC (без ; для append)"
+  },
+
+  "Вставить компонент с deps ($.MC + deps)": {
+    "prefix": "mc_use_d",
+    "body": [
+      "$.MC(${1:Component}, ${2:[state]}, { ${3} }${4:, '${5:key}'})"
+    ],
+    "description": "mc_use_d — $.MC(Component, deps, props) (без ; для append)"
+  },
+
+  "Функция-контейнер ($.MC(fn, deps))": {
+    "prefix": "mc_fn",
+    "body": [
+      "$.MC((values, props) => {",
+      "    const [${1:v0}] = values",
+      "    ${2:// return $('<div>')}",
+      "    return $('<div>')",
+      "}, ${3:[]}${4:, { ${5} }}${6:, '${7:key}'})"
+    ],
+    "description": "mc_fn — function-container: $.MC((values, props)=>{}, deps) (без ; для append)"
+  },
+
+  "Эффект ($.MC.effect)": {
+    "prefix": "mc_eff",
+    "body": [
+      "$.MC.effect((values) => {",
+      "    ${1:// side-effect}",
+      "    return () => {",
+      "        ${2:// cleanup}",
+      "    };",
+      "}, ${3:[]}${4:, '${5:key}'});"
+    ],
+    "description": "mc_eff — effect с deps и cleanup"
+  },
+
+  "Memo ($.MC.memo)": {
+    "prefix": "mc_memo",
+    "body": [
+      "$.MC.memo(${1:Component}, { ${2} }${3:, '${4:key}'})"
+    ],
+    "description": "mc_memo — мемоизированный рендер компонента (без ; для append)"
+  },
+
+  "Memo с deps ($.MC.memo + deps)": {
+    "prefix": "mc_memo_d",
+    "body": [
+      "$.MC.memo(${1:Component}, ${2:[state]}, { ${3} }${4:, '${5:key}'})"
+    ],
+    "description": "mc_memo_d — $.MC.memo(Component, deps, props) (без ; для append)"
+  },
+
+  "Создать ref (MC.createRef)": {
+    "prefix": "mc_ref",
+    "body": [
+      "const ${1:ref} = MC.createRef();"
+    ],
+    "description": "mc_ref — создать ref-объект"
+  },
+
+  "Привязать ref к элементу (MC.ref)": {
+    "prefix": "mc_ref_bind",
+    "body": [
+      "MC.ref(${1:$el}, ${2:ref});"
+    ],
+    "description": "mc_ref_bind — привязать ref к JQuery/Element"
+  },
+
+  "Host-элемент (MC.host)": {
+    "prefix": "mc_host",
+    "body": [
+      "MC.host(${1:$el}${2:, ${3:ref}});"
+    ],
+    "description": "mc_host — пометить узел как host (не диффить поддерево)"
+  },
+
+  "mounted hook": {
+    "prefix": "mc_mounted",
+    "body": [
+      "mounted(el, vdom) {",
+      "    ${1:// called after mount}",
+      "}"
+    ],
+    "description": "mc_mounted — lifecycle hook mounted"
+  },
+
+  "updated hook": {
+    "prefix": "mc_updated",
+    "body": [
+      "updated(prevEl, nextEl, vdom) {",
+      "    ${1:// called after patch}",
+      "}"
+    ],
+    "description": "mc_updated — lifecycle hook updated"
+  },
+
+  "unmounted hook": {
+    "prefix": "mc_unmounted",
+    "body": [
+      "unmounted(el, vdom) {",
+      "    ${1:// called before cleanup}",
+      "}"
+    ],
+    "description": "mc_unmounted — lifecycle hook unmounted"
+  }
 }
