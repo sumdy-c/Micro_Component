@@ -183,6 +183,16 @@ class MCState {
 				queueMicrotask(() => {
 					const MCInstance = _mc_instance_restore_object.instance;
 
+					const getDepth = (st) => {
+						const key = st?.traceKey ?? st?.nameProp ?? '';
+						const s = typeof key === 'string' ? key : '';
+						// глубина по количеству "_" (у тебя это соответствует вложенности)
+						const m = s.match(/_/g);
+						return m ? m.length : 0;
+					};
+
+					const isGlobal = (st) => !st?.local; // local undefined/null -> глобальное
+
 					const runFlush = () => {
 						const pending = MCInstance.listPendingRedrawRequests;
 
@@ -197,27 +207,83 @@ class MCState {
 							return;
 						}
 
+						// 1) Собираем валидные state
+						const dirtyStates = [];
+						for (let i = 0; i < ids.length; i++) {
+							const st = MCInstance.getStateID(ids[i]);
+							if (!st || !st.passport) continue;
+							dirtyStates.push(st);
+						}
+
+						// 2) Упорядочим: глобальные -> локальные (deep-first)
+						dirtyStates.sort((a, b) => {
+							const ag = isGlobal(a);
+							const bg = isGlobal(b);
+							if (ag !== bg) return ag ? -1 : 1;
+
+							// локальные: глубже сначала
+							if (!ag) {
+								const da = getDepth(a);
+								const db = getDepth(b);
+								if (da !== db) return db - da;
+							}
+
+							// стабильность
+							const ka = String(a.traceKey ?? a.nameProp ?? '');
+							const kb = String(b.traceKey ?? b.nameProp ?? '');
+							return ka < kb ? -1 : ka > kb ? 1 : 0;
+						});
+
+						// 3) Дедуп по VDOM ключам
+						// key -> maxDepth (для порядка diffing)
+						const dirtyFC = new Map();
+						const dirtyVC = new Map();
 						const dirtyEffectKeys = new Set();
+
+						const engine = MCInstance.engine;
 
 						MCInstance._batching = true;
 						MCInstance._batchingEffects = true;
 
 						try {
-							for (let i = 0; i < ids.length; i++) {
-								const st = MCInstance.getStateID(ids[i]);
+							for (let i = 0; i < dirtyStates.length; i++) {
+								const st = dirtyStates[i];
+								const depth = getDepth(st);
 
-								if (!st || !st.passport) {
-									continue;
+								// Коммитим значение в passport, но без рендера (batching=true)
+								st.passport.value = st.value;
+
+								// FC (function containers): обновляем virtual.states и помечаем VDOM как dirty
+								if (st.fcCollection && st.fcCollection.size) {
+									st.fcCollection.forEach((item) => {
+										const v = MCInstance.fcCollection.get(item.effectKey);
+										if (!v) return;
+
+										v.states.set(st.id, st.value);
+
+										const prev = dirtyFC.get(item.effectKey);
+										if (prev == null || depth > prev) dirtyFC.set(item.effectKey, depth);
+									});
 								}
 
-								// Собираем эффекты, которые зависят от этого state,
-								// и заранее обновляем effect.states, как это делал бы runEffectWork
+								// VC (components): обновляем virtual.states и помечаем VDOM как dirty
+								if (st.virtualCollection && st.virtualCollection.size) {
+									st.virtualCollection.forEach((item) => {
+										const v = MCInstance.componentCollection.get(item.effectKey);
+										if (!v) return;
+
+										v.states.set(st.id, st.value);
+
+										const prev = dirtyVC.get(item.effectKey);
+										if (prev == null || depth > prev) dirtyVC.set(item.effectKey, depth);
+									});
+								}
+
+								// Effects: обновляем eff.states и собираем dirty keys, запуск позже
 								if (st.effectCollection && st.effectCollection.size) {
 									st.effectCollection.forEach((item) => {
 										const eff = MCInstance.effectCollection.get(item.effectKey);
-										if (!eff) {
-											return;
-										}
+										if (!eff) return;
 
 										const prev = eff.states.get(st.id);
 										if (prev !== st.value) {
@@ -226,36 +292,48 @@ class MCState {
 										}
 									});
 								}
-
-								// Последний state в батче — единственный, который реально вызовет render()
-								if (i === ids.length - 1) {
-									MCInstance._batching = false;
-								}
-
-								st.passport.value = st.value;
 							}
 						} finally {
 							MCInstance._batching = false;
 							MCInstance._batchingEffects = false;
 						}
 
+						// 4) DOM diff: каждый VDOM ровно один раз
+						// FC — порядок не критичен, но сортируем по depth (глубже -> раньше)
+						const fcKeys = Array.from(dirtyFC.entries())
+							.sort((a, b) => b[1] - a[1])
+							.map(([k]) => k);
+
+						for (let i = 0; i < fcKeys.length; i++) {
+							const v = MCInstance.fcCollection.get(fcKeys[i]);
+							if (!v) continue;
+							engine.diffing(v);
+						}
+
+						// Components — deep-first (ребёнок -> родитель)
+						const vcKeys = Array.from(dirtyVC.entries())
+							.sort((a, b) => b[1] - a[1])
+							.map(([k]) => k);
+
+						for (let i = 0; i < vcKeys.length; i++) {
+							const v = MCInstance.componentCollection.get(vcKeys[i]);
+							if (!v) continue;
+							engine.diffingComponent(v);
+						}
+
+						// 5) Effects после DOM-коммита
 						dirtyEffectKeys.forEach((effectKey) => {
 							const eff = MCInstance.effectCollection.get(effectKey);
-							if (!eff) {
-								return;
-							}
+							if (!eff) return;
 
-							const unmountCallFunction = eff.run(
-								MCInstance.engine.getArrayValuesStates(eff),
-								eff.options
-							);
+							const unmountCallFunction = eff.run(engine.getArrayValuesStates(eff), eff.options);
 
 							if (unmountCallFunction) {
 								eff.unmountCaller = unmountCallFunction;
 							}
 						});
 
-						// Если во время flush/эффектов появились новые set'ы — прогоняем ещё раз
+						// 6) Если в процессе появились новые set() — прогоняем ещё раз
 						if (MCInstance.listPendingRedrawRequests.size) {
 							queueMicrotask(runFlush);
 							return;
@@ -1186,8 +1264,6 @@ class MasterDiff {
 				!newNode.instanceMC || newNode.instanceMCtype !== 'fn' || newNode.instanceMC !== oldNode.instanceMC;
 
 			if (fnRemoved && oldKey) {
-				// если ты добавил force в _cleanupFunctionContainerByKey — используй его
-				// иначе можно оставить без force, но лучше сделать аналогично компонентам
 				try {
 					this.mc._cleanupFunctionContainerByKey(oldKey, true);
 				} catch (e) {
@@ -1495,9 +1571,7 @@ class PatchMaster {
 			// b) ref-object
 			const obj = el.__mc_ref_obj && typeof el.__mc_ref_obj === 'object' ? el.__mc_ref_obj : null;
 			const lastObj =
-				el.__mc_ref_last_obj && typeof el.__mc_ref_last_obj === 'object'
-					? el.__mc_ref_last_obj
-					: null;
+				el.__mc_ref_last_obj && typeof el.__mc_ref_last_obj === 'object' ? el.__mc_ref_last_obj : null;
 
 			if (!obj && lastObj && el.__mc_ref_obj_mounted) {
 				try {
@@ -1565,13 +1639,11 @@ class PatchMaster {
 		if (
 			rootNode &&
 			rootNode.nodeType === 1 &&
-			(
-				rootNode.instanceMC ||
+			(rootNode.instanceMC ||
 				rootNode.__mc_ref_cb ||
 				rootNode.__mc_ref_obj ||
 				rootNode.__mc_ref_last_cb ||
-				rootNode.__mc_ref_last_obj
-			)
+				rootNode.__mc_ref_last_obj)
 		) {
 			processEl(rootNode);
 		}
@@ -1607,12 +1679,7 @@ class PatchMaster {
 
 			try {
 				// (оставляю твою текущую сигнатуру вызова как есть)
-				vdom.mounted.call(
-					vdom.component,
-					rootMC.engine.formationStates(vdom),
-					vdom.normalized.props,
-					vdom
-				);
+				vdom.mounted.call(vdom.component, rootMC.engine.formationStates(vdom), vdom.normalized.props, vdom);
 			} catch (e) {
 				console.error('MC mounted error:', e);
 			}
@@ -1645,10 +1712,7 @@ class PatchMaster {
 		}
 
 		// object
-		const lastObj =
-			el.__mc_ref_last_obj && typeof el.__mc_ref_last_obj === 'object'
-				? el.__mc_ref_last_obj
-				: null;
+		const lastObj = el.__mc_ref_last_obj && typeof el.__mc_ref_last_obj === 'object' ? el.__mc_ref_last_obj : null;
 		const obj = el.__mc_ref_obj && typeof el.__mc_ref_obj === 'object' ? el.__mc_ref_obj : null;
 
 		if (el.__mc_ref_obj_mounted) {
@@ -1685,10 +1749,7 @@ class PatchMaster {
 			NodeFilter.SHOW_ELEMENT,
 			{
 				acceptNode(node) {
-					return node.__mc_ref_cb ||
-						node.__mc_ref_obj ||
-						node.__mc_ref_last_cb ||
-						node.__mc_ref_last_obj
+					return node.__mc_ref_cb || node.__mc_ref_obj || node.__mc_ref_last_cb || node.__mc_ref_last_obj
 						? NodeFilter.FILTER_ACCEPT
 						: NodeFilter.FILTER_SKIP;
 				},
@@ -2503,11 +2564,12 @@ class MC {
 
 	_cleanupComponentByKey(key, force = false) {
 		const VDOM = this.componentCollection.get(key);
+
 		if (!VDOM) {
 			return;
 		}
 
-		if (!force && VDOM.HTML && VDOM.HTML.isConnected) {
+		if (!force && VDOM.HTML && VDOM.HTML.isConnected && VDOM.HTML.tagName !== 'MC') {
 			return;
 		}
 
@@ -2558,13 +2620,15 @@ class MC {
 				}
 			}
 		}
+
 		for (const ekey of toDeleteEffect) this.effectCollection.delete(ekey);
+
+		if (VDOM.HTML.isConnected && VDOM.HTML.tagName === 'MC') {
+			VDOM.HTML.remove();
+		}
 
 		// финально удалить VDOM
 		this.componentCollection.delete(key);
-
-		// (не обязательно) подчистить ссылку в самом VDOM
-		// VDOM.HTML = null;
 	}
 
 	_enableDomObserver() {
@@ -2672,6 +2736,14 @@ class MC {
 		// чистим: компоненты и fn независимо
 		for (const key of fnKeys) this._cleanupFunctionContainerByKey(key);
 		for (const key of compKeys) this._cleanupComponentByKey(key);
+	}
+
+	cleanupComponent(key, force = false) {
+		if (!key) {
+			return;
+		}
+
+		this._cleanupComponentByKey(key, force);
 	}
 
 	setCurrentRenderingInstance(key) {
