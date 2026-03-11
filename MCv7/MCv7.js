@@ -1,7 +1,7 @@
 /// <reference types="./types/mc.d.ts" />
 //TODO v8 = batched render / microtask queue;
 
-//MCv7.2
+//MCv7.13
 class MCState {
 	/**
 	 * id состояния
@@ -1053,62 +1053,66 @@ class AttrDiff {
 		const set = {};
 		const remove = [];
 
-		// Стандартная логика по атрибутам (атрибуты как есть)
+		const isElement = oldNode.nodeType === 1 && newNode.nodeType === 1;
+		const tag = isElement ? (newNode.tagName || '').toLowerCase() : '';
+		const isCheckable = tag === 'input' && (newNode.type === 'checkbox' || newNode.type === 'radio');
+
+		// set обычных атрибутов
 		for (const attr of newAttrs) {
+			// checked для checkbox/radio диффим отдельно по property
+			if (isCheckable && attr.name === 'checked') {
+				continue;
+			}
+
 			if (oldNode.getAttribute(attr.name) !== attr.value) {
 				set[attr.name] = attr.value;
 			}
 		}
+
+		// remove обычных атрибутов
 		for (const attr of oldAttrs) {
+			// checked для checkbox/radio не трогаем здесь
+			if (isCheckable && attr.name === 'checked') {
+				continue;
+			}
+
+			// value у form-элементов тоже отдельно
+			if ((tag === 'input' || tag === 'textarea' || tag === 'select') && attr.name === 'value') {
+				continue;
+			}
+
 			if (!newNode.hasAttribute(attr.name)) {
 				remove.push(attr.name);
 			}
 		}
 
-		if (oldNode.nodeType === 1 && newNode.nodeType === 1) {
-			const tag = (newNode.tagName || '').toLowerCase();
-
-			for (const attr of oldAttrs) {
-				// ✅ value у форм-элементов диффится отдельно через property value
-				if ((tag === 'input' || tag === 'textarea' || tag === 'select') && attr.name === 'value') {
-					continue;
-				}
-
-				if (!newNode.hasAttribute(attr.name)) {
-					remove.push(attr.name);
-				}
-			}
-
+		if (isElement) {
 			// value для input/textarea/select
 			if (tag === 'input' || tag === 'textarea' || tag === 'select') {
-				// сравниваем property value (текущее) с новой версией
 				const oldVal = oldNode.value != null ? String(oldNode.value) : oldNode.getAttribute('value');
 				const newVal = newNode.value != null ? String(newNode.value) : newNode.getAttribute('value');
+
 				if (oldVal !== newVal) {
-					set['value'] = newVal == null ? '' : newVal;
+					set.value = newVal == null ? '' : newVal;
 				}
 			}
 
-			// checked для checkbox/radio — ставим/удаляем реальный атрибут checked
-			if (tag === 'input' && (newNode.type === 'checkbox' || newNode.type === 'radio')) {
+			// checked только по property
+			if (isCheckable) {
 				const oldChecked = !!oldNode.checked;
 				const newChecked = !!newNode.checked;
+
 				if (oldChecked !== newChecked) {
 					if (newChecked) {
-						set['checked'] = 'checked';
+						set.checked = 'checked';
 					} else {
-						// поместим в remove — так как атрибут должен быть удалён
 						remove.push('checked');
 					}
 				}
 			}
 		}
 
-		return {
-			set,
-			remove,
-			ctx,
-		};
+		return { set, remove, ctx };
 	}
 
 	applyAttributes(attrPatch, domNode) {
