@@ -1,7 +1,7 @@
 /// <reference types="./types/mc.d.ts" />
 //TODO v8 = batched render / microtask queue;
 
-//MCv7.2
+//MCv7.13
 class MCState {
 	/**
 	 * id состояния
@@ -1053,62 +1053,66 @@ class AttrDiff {
 		const set = {};
 		const remove = [];
 
-		// Стандартная логика по атрибутам (атрибуты как есть)
+		const isElement = oldNode.nodeType === 1 && newNode.nodeType === 1;
+		const tag = isElement ? (newNode.tagName || '').toLowerCase() : '';
+		const isCheckable = tag === 'input' && (newNode.type === 'checkbox' || newNode.type === 'radio');
+
+		// set обычных атрибутов
 		for (const attr of newAttrs) {
+			// checked для checkbox/radio диффим отдельно по property
+			if (isCheckable && attr.name === 'checked') {
+				continue;
+			}
+
 			if (oldNode.getAttribute(attr.name) !== attr.value) {
 				set[attr.name] = attr.value;
 			}
 		}
+
+		// remove обычных атрибутов
 		for (const attr of oldAttrs) {
+			// checked для checkbox/radio не трогаем здесь
+			if (isCheckable && attr.name === 'checked') {
+				continue;
+			}
+
+			// value у form-элементов тоже отдельно
+			if ((tag === 'input' || tag === 'textarea' || tag === 'select') && attr.name === 'value') {
+				continue;
+			}
+
 			if (!newNode.hasAttribute(attr.name)) {
 				remove.push(attr.name);
 			}
 		}
 
-		if (oldNode.nodeType === 1 && newNode.nodeType === 1) {
-			const tag = (newNode.tagName || '').toLowerCase();
-
-			for (const attr of oldAttrs) {
-				// ✅ value у форм-элементов диффится отдельно через property value
-				if ((tag === 'input' || tag === 'textarea' || tag === 'select') && attr.name === 'value') {
-					continue;
-				}
-
-				if (!newNode.hasAttribute(attr.name)) {
-					remove.push(attr.name);
-				}
-			}
-
+		if (isElement) {
 			// value для input/textarea/select
 			if (tag === 'input' || tag === 'textarea' || tag === 'select') {
-				// сравниваем property value (текущее) с новой версией
 				const oldVal = oldNode.value != null ? String(oldNode.value) : oldNode.getAttribute('value');
 				const newVal = newNode.value != null ? String(newNode.value) : newNode.getAttribute('value');
+
 				if (oldVal !== newVal) {
-					set['value'] = newVal == null ? '' : newVal;
+					set.value = newVal == null ? '' : newVal;
 				}
 			}
 
-			// checked для checkbox/radio — ставим/удаляем реальный атрибут checked
-			if (tag === 'input' && (newNode.type === 'checkbox' || newNode.type === 'radio')) {
+			// checked только по property
+			if (isCheckable) {
 				const oldChecked = !!oldNode.checked;
 				const newChecked = !!newNode.checked;
+
 				if (oldChecked !== newChecked) {
 					if (newChecked) {
-						set['checked'] = 'checked';
+						set.checked = 'checked';
 					} else {
-						// поместим в remove — так как атрибут должен быть удалён
 						remove.push('checked');
 					}
 				}
 			}
 		}
 
-		return {
-			set,
-			remove,
-			ctx,
-		};
+		return { set, remove, ctx };
 	}
 
 	applyAttributes(attrPatch, domNode) {
@@ -1246,6 +1250,34 @@ class MasterDiff {
 		this.classDiff = classDiff;
 		this.eventDiff = eventDiff;
 		this.mc = mc;
+	}
+
+	_getStableChildKey(node) {
+		if (!node || node.nodeType !== Node.ELEMENT_NODE) {
+			return null;
+		}
+
+		if (!node.instanceMC || !node.instanceMCtype) {
+			return null;
+		}
+
+		const rootMC = this.mc.constructor.name === 'MC' ? this.mc : this.mc.mc;
+
+		if (node.instanceMCtype === 'mc_component') {
+			const componentKey = rootMC.componentIdsCollection.get(node.instanceMC);
+			return componentKey ? `mc:${componentKey}` : null;
+		}
+
+		if (node.instanceMCtype === 'fn') {
+			const fnKey = rootMC.fcIdsCollection.get(node.instanceMC);
+			return fnKey ? `fn:${fnKey}` : null;
+		}
+
+		return null;
+	}
+
+	_isKeyedChild(node) {
+		return !!this._getStableChildKey(node);
 	}
 
 	cleanupVDOM(oldNode, newNode) {
@@ -1458,14 +1490,126 @@ class MasterDiff {
 		const context = Object.assign({}, ctx, { level: (ctx.level || 0) + 1 });
 		const oldChildren = Array.from(oldNode.childNodes);
 		const newChildren = Array.from(newNode.childNodes);
-		const maxLen = Math.max(oldChildren.length, newChildren.length);
-		const childPatches = [];
 
-		for (let i = 0; i < maxLen; i++) {
-			const path = context.path + '/' + i; // глубина
-			childPatches.push(this.diffNode(oldChildren[i], newChildren[i], { ...context, path }));
+		const oldUsed = new Set();
+		const opsByNewIndex = new Array(newChildren.length).fill(null);
+
+		// 1) Индекс старых keyed-детей
+		const oldKeyToIndex = new Map();
+
+		for (let oldIndex = 0; oldIndex < oldChildren.length; oldIndex++) {
+			const key = this._getStableChildKey(oldChildren[oldIndex]);
+
+			// первая запись побеждает; дубликаты ключей считаем ошибкой пользователя
+			if (key && !oldKeyToIndex.has(key)) {
+				oldKeyToIndex.set(key, oldIndex);
+			}
 		}
-		return { type: 'CHILDREN', patches: childPatches, ctx: context };
+
+		// 2) Сначала матчим keyed-детей по ключу, независимо от позиции
+		for (let newIndex = 0; newIndex < newChildren.length; newIndex++) {
+			const newChild = newChildren[newIndex];
+			const key = this._getStableChildKey(newChild);
+
+			if (!key) {
+				continue;
+			}
+
+			const oldIndex = oldKeyToIndex.get(key);
+			const path = `${context.path}/${newIndex}`;
+
+			if (oldIndex == null) {
+				opsByNewIndex[newIndex] = {
+					kind: 'ADD',
+					newIndex,
+					node: newChild,
+					path,
+				};
+				continue;
+			}
+
+			oldUsed.add(oldIndex);
+
+			opsByNewIndex[newIndex] = {
+				kind: 'PATCH',
+				oldIndex,
+				newIndex,
+				path,
+				patch: this.diffNode(oldChildren[oldIndex], newChild, { ...context, path }),
+			};
+		}
+
+		// 3) Остаток матчим позиционно, но только по НЕ-keyed детям
+		let oldCursor = 0;
+
+		for (let newIndex = 0; newIndex < newChildren.length; newIndex++) {
+			if (opsByNewIndex[newIndex]) {
+				continue;
+			}
+
+			const newChild = newChildren[newIndex];
+			const newChildIsKeyed = this._isKeyedChild(newChild);
+			const path = `${context.path}/${newIndex}`;
+
+			// unmatched keyed new -> ADD
+			if (newChildIsKeyed) {
+				opsByNewIndex[newIndex] = {
+					kind: 'ADD',
+					newIndex,
+					node: newChild,
+					path,
+				};
+				continue;
+			}
+
+			// ищем следующий свободный НЕ-keyed old
+			while (
+				oldCursor < oldChildren.length &&
+				(oldUsed.has(oldCursor) || this._isKeyedChild(oldChildren[oldCursor]))
+			) {
+				oldCursor++;
+			}
+
+			if (oldCursor < oldChildren.length) {
+				const oldIndex = oldCursor++;
+				oldUsed.add(oldIndex);
+
+				opsByNewIndex[newIndex] = {
+					kind: 'PATCH',
+					oldIndex,
+					newIndex,
+					path,
+					patch: this.diffNode(oldChildren[oldIndex], newChild, { ...context, path }),
+				};
+			} else {
+				opsByNewIndex[newIndex] = {
+					kind: 'ADD',
+					newIndex,
+					node: newChild,
+					path,
+				};
+			}
+		}
+
+		// 4) Всё, что осталось в old и не было использовано -> REMOVE
+		const removes = [];
+
+		for (let oldIndex = 0; oldIndex < oldChildren.length; oldIndex++) {
+			if (!oldUsed.has(oldIndex)) {
+				removes.push({
+					kind: 'REMOVE',
+					oldIndex,
+					path: `${context.path}/${oldIndex}`,
+				});
+			}
+		}
+
+		return {
+			type: 'CHILDREN',
+			updates: opsByNewIndex.filter(Boolean),
+			removes,
+			ctx: context,
+		};
 	}
 }
 
@@ -1859,7 +2003,7 @@ class PatchMaster {
 				return domNode;
 
 			case 'CHILDREN':
-				this._applyChildren(patch.patches, domNode, context);
+				this._applyChildren(patch, domNode, context);
 				return domNode;
 
 			case 'NONE':
@@ -1874,42 +2018,60 @@ class PatchMaster {
 	 * Rекурсивное применение патчей к детям.
 	 * ✅ При REMOVE ребёнка делаем ref-detach перед removeChild.
 	 */
-	_applyChildren(childPatches, domNode, ctx) {
-		for (let i = 0; i < childPatches.length; i++) {
-			const patch = childPatches[i];
-			const child = domNode.childNodes[i];
-
-			// ADD: append
-			if (!child && patch && patch.type === 'ADD') {
-				domNode.appendChild(patch.node);
-				continue;
-			}
-
-			// REMOVE
-			if (child && patch && patch.type === 'REMOVE') {
-				// ✅ detach refs before removal
-				this._detachRefsDeep(child);
-
-				// при удалении ребёнка из DOM он сместится. Без отката пропустит обработку
-				--i;
-				domNode.removeChild(child);
-				continue;
-			}
-
-			// EMPTY SKIP
-			if (!child && patch) continue;
-
-			// RECURSIVE
-			if (child && patch) {
-				this.applyPatch(patch, child, ctx);
-			}
+	_applyChildren(childrenPatch, domNode, ctx) {
+		if (!childrenPatch) {
+			return;
 		}
 
-		// Если новые дети длиннее старых — добавить недостающих
-		for (let i = domNode.childNodes.length; i < childPatches.length; i++) {
-			const patch = childPatches[i];
-			if (patch && patch.type === 'ADD') {
-				domNode.appendChild(patch.node);
+		const updates = Array.isArray(childrenPatch.updates) ? childrenPatch.updates : [];
+		const removes = Array.isArray(childrenPatch.removes) ? childrenPatch.removes : [];
+
+		// Снимок старых детей до мутаций.
+		// По нему можно стабильно брать oldIndex даже после remove/insert.
+		const originalChildren = Array.from(domNode.childNodes);
+
+		// 1) REMOVE сначала, справа налево
+		for (let i = removes.length - 1; i >= 0; i--) {
+			const op = removes[i];
+			const child = originalChildren[op.oldIndex];
+
+			if (!child || child.parentNode !== domNode) {
+				continue;
+			}
+
+			this._detachRefsDeep(child);
+			domNode.removeChild(child);
+		}
+
+		// 2) Затем ADD / PATCH в порядке newIndex
+		for (let i = 0; i < updates.length; i++) {
+			const op = updates[i];
+			if (!op) {
+				continue;
+			}
+
+			if (op.kind === 'ADD') {
+				const anchor = domNode.childNodes[op.newIndex] || null;
+				domNode.insertBefore(op.node, anchor);
+				continue;
+			}
+
+			if (op.kind === 'PATCH') {
+				const child = originalChildren[op.oldIndex];
+
+				if (!child || child.parentNode !== domNode) {
+					continue;
+				}
+
+				// Консервативный move:
+				// ставим существующий узел в нужную позицию,
+				// затем применяем его patch.
+				const anchor = domNode.childNodes[op.newIndex] || null;
+				if (anchor !== child) {
+					domNode.insertBefore(child, anchor);
+				}
+
+				this.applyPatch(op.patch, child, ctx);
 			}
 		}
 	}
@@ -3127,7 +3289,7 @@ class MC {
 						if (entry.effectKey === key) {
 							state.virtualCollection.delete(entry);
 
-							if (state.local && !state.virtualCollection.length) {
+							if (state.local && state.virtualCollection.size === 0) {
 								this.mc_state_global.delete(state);
 							}
 							break;
