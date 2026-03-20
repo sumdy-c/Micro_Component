@@ -170,6 +170,8 @@ class MCState {
 
 		if (this.passport) {
 			this.value = newValue;
+			this._identityHash = MCState.computeShallowIdentity(newValue);
+			this._version++;
 
 			const MCInstance = _mc_instance_restore_object.instance;
 
@@ -183,13 +185,7 @@ class MCState {
 				queueMicrotask(() => {
 					const MCInstance = _mc_instance_restore_object.instance;
 
-					const getDepth = (st) => {
-						const key = st?.traceKey ?? st?.nameProp ?? '';
-						const s = typeof key === 'string' ? key : '';
-						// глубина по количеству "_" (у тебя это соответствует вложенности)
-						const m = s.match(/_/g);
-						return m ? m.length : 0;
-					};
+					const getDepth = (st) => MCInstance.getTreeDepthFromKey(st?.traceKey ?? st?.nameProp ?? '');
 
 					const isGlobal = (st) => !st?.local; // local undefined/null -> глобальное
 
@@ -2159,15 +2155,15 @@ class MC_Component {
 				const localState = instance[prop];
 
 				if (localState.local && !localState.traceKey) {
-					localState.traceKey = `lcl_state_${normalized.key}`;
+					localState.traceKey = this.mc.buildLocalStateTraceKey(normalized.key);
 					localState.nameProp = prop;
 					normalized.states.push(instance[prop]);
 				}
-
-				instance.componentCollection.set(normalized.key, virtualElement);
-				instance.componentIdsCollection.set(id, normalized.key);
 			}
 		}
+
+		instance.componentCollection.set(normalized.key, virtualElement);
+		instance.componentIdsCollection.set(id, normalized.key);
 
 		this.mc.componentCollection.set(normalized.key, virtualElement);
 		this.mc.componentIdsCollection.set(id, normalized.key);
@@ -2343,6 +2339,8 @@ class MC {
 		 * Просмотр потока рендера
 		 */
 		this.currentRenderingInstance = new Set();
+		this.TREE_KEY_SEPARATOR = '%=>%';
+		this.EFFECT_PARENT_SEPARATOR = '__';
 
 		// константы для счетчиков очистки
 		this.COUNTER_CLEAR = 150;
@@ -2642,7 +2640,7 @@ class MC {
 	}
 
 	scheduleCleanDeadVDOM() {
-		if (this._cleaningScheduled || this._domObserver) {
+		if (this._cleaningScheduled) {
 			return;
 		}
 
@@ -2700,12 +2698,12 @@ class MC {
 		});
 	}
 
-	_cleanupFunctionContainerByKey(key) {
+	_cleanupFunctionContainerByKey(key, force = false) {
 		const VDOM = this.fcCollection.get(key);
 		if (!VDOM) return;
 
 		// если вдруг он уже снова в DOM — не чистим
-		if (VDOM.HTML && VDOM.HTML.isConnected) return;
+		if (!force && VDOM.HTML && VDOM.HTML.isConnected) return;
 
 		this.fcIdsCollection.delete(VDOM.id);
 
@@ -2783,7 +2781,13 @@ class MC {
 			}
 		}
 
-		for (const ekey of toDeleteEffect) this.effectCollection.delete(ekey);
+		for (const ekey of toDeleteEffect) {
+			const effect = this.effectCollection.get(ekey);
+			if (effect) {
+				this.effectIdsCollection.delete(effect.id);
+			}
+			this.effectCollection.delete(ekey);
+		}
 
 		if (VDOM.HTML.isConnected && VDOM.HTML.tagName === 'MC') {
 			VDOM.HTML.remove();
@@ -2862,6 +2866,8 @@ class MC {
 				this._cleanupRemovedSubtree(root);
 			}
 		}
+
+		this.scheduleCleanDeadVDOM();
 	}
 
 	_cleanupRemovedSubtree(root) {
@@ -2881,10 +2887,8 @@ class MC {
 			}
 		};
 
-		// сам root
 		if (root.nodeType === 1) collect(root);
 
-		// потомки
 		const walker = document.createTreeWalker(root, NodeFilter.SHOW_ELEMENT, {
 			acceptNode: (node) => (node.instanceMC ? NodeFilter.FILTER_ACCEPT : NodeFilter.FILTER_SKIP),
 		});
@@ -2895,9 +2899,8 @@ class MC {
 			node = walker.nextNode();
 		}
 
-		// чистим: компоненты и fn независимо
-		for (const key of fnKeys) this._cleanupFunctionContainerByKey(key);
-		for (const key of compKeys) this._cleanupComponentByKey(key);
+		for (const key of fnKeys) this._cleanupFunctionContainerByKey(key, true);
+		for (const key of compKeys) this._cleanupComponentByKey(key, true);
 	}
 
 	cleanupComponent(key, force = false) {
@@ -2906,6 +2909,40 @@ class MC {
 		}
 
 		this._cleanupComponentByKey(key, force);
+	}
+
+	getTreeKeySeparator() {
+		return this.TREE_KEY_SEPARATOR;
+	}
+
+	getEffectParentSeparator() {
+		return this.EFFECT_PARENT_SEPARATOR;
+	}
+
+	joinTreeKeys(parentKey, childKey) {
+		if (!parentKey) {
+			return childKey;
+		}
+
+		if (!childKey) {
+			return parentKey;
+		}
+
+		return `${parentKey}${this.getTreeKeySeparator()}${childKey}`;
+	}
+
+	getTreeDepthFromKey(key) {
+		const source = typeof key === 'string' ? key : '';
+		if (!source) {
+			return 0;
+		}
+
+		const separator = this.getTreeKeySeparator();
+		return source.split(separator).length - 1;
+	}
+
+	buildLocalStateTraceKey(componentKey) {
+		return `lcl_state${this.getTreeKeySeparator()}${componentKey}`;
 	}
 
 	setCurrentRenderingInstance(key) {
@@ -2918,7 +2955,7 @@ class MC {
 			instance = this.mc;
 		}
 
-		return Array.from(instance.currentRenderingInstance).join('_');
+		return Array.from(instance.currentRenderingInstance).join(instance.getTreeKeySeparator());
 	}
 
 	resetCurrentRenderingInstance() {
@@ -3181,7 +3218,7 @@ class MC {
 				}
 			});
 
-		if (!dependency && !dependency.length) {
+		if (!dependency || !dependency.length) {
 			this.log.error('Ошибка чтения массива состояний', [
 				`Структура функционального контейнера:`,
 				`${NativeVirtual.draw}`,
@@ -3231,28 +3268,7 @@ class MC {
 		for (let i = 0; i < deadKeys.length; i += batchSize) {
 			const batch = deadKeys.slice(i, i + batchSize);
 			for (const key of batch) {
-				const VDOM = this.fcCollection.get(key);
-				if (!VDOM) {
-					continue;
-				}
-
-				this.fcIdsCollection.delete(VDOM.id);
-
-				for (const [stateId] of VDOM.states) {
-					const state = this.getStateID(stateId);
-					if (!state) {
-						continue;
-					}
-
-					for (const entry of state.fcCollection) {
-						if (entry.effectKey === key) {
-							state.fcCollection.delete(entry);
-							break;
-						}
-					}
-				}
-
-				this.fcCollection.delete(key);
+				this._cleanupFunctionContainerByKey(key, true);
 			}
 
 			await new Promise((r) => setTimeout(r, 0));
@@ -3272,60 +3288,9 @@ class MC {
 			const batch = deadKeys.slice(i, i + batchSize);
 
 			for (const key of batch) {
-				const VDOM = this.componentCollection.get(key);
-				if (!VDOM) {
-					continue;
-				}
-
-				this.componentIdsCollection.delete(VDOM.id);
-
-				for (const [stateId] of VDOM.states) {
-					const state = this.getStateID(stateId);
-					if (!state) {
-						continue;
-					}
-
-					for (const entry of state.virtualCollection) {
-						if (entry.effectKey === key) {
-							state.virtualCollection.delete(entry);
-
-							if (state.local && state.virtualCollection.size === 0) {
-								this.mc_state_global.delete(state);
-							}
-							break;
-						}
-					}
-				}
-
-				const toDeleteEffect = [];
-
-				for (const [key, value] of this.effectCollection) {
-					if (value.parent === VDOM.key) {
-						value.unmountCaller();
-						toDeleteEffect.push(key);
-
-						for (const [stateKey] of value.states) {
-							const state = this.getStateID(stateKey);
-
-							if (state) {
-								for (const item of state.effectCollection) {
-									if (item.effectKey === key) {
-										state.effectCollection.delete(item);
-									}
-								}
-							}
-						}
-					}
-				}
-
-				for (const key of toDeleteEffect) {
-					this.effectCollection.delete(key);
-				}
-
-				this.componentCollection.delete(key);
+				this._cleanupComponentByKey(key, true);
 			}
 
-			// Освободим поток (асинхронная пауза)
 			await new Promise((r) => setTimeout(r, 0));
 		}
 	}
@@ -3335,9 +3300,10 @@ class MC {
 	 */
 	createSignatureEffect(virtualFn, id, iteratorKey) {
 		const parentKey = this.getCurrentRenderingInstance();
+		const effectSeparator = this.getEffectParentSeparator();
 
 		const key = parentKey
-			? `${this.generateComponentKey(virtualFn, iteratorKey)}__${parentKey}`
+			? `${this.generateComponentKey(virtualFn, iteratorKey)}${effectSeparator}${parentKey}`
 			: this.generateComponentKey(virtualFn, iteratorKey);
 
 		const virtualElement = {
@@ -3374,7 +3340,7 @@ class MC {
 				}
 			});
 
-		if (!dependency.length) {
+		if (!dependency || !dependency.length) {
 			const unmountCallFunction = NativeVirtual.run(NativeVirtual.states.values());
 
 			if (unmountCallFunction) {
@@ -3386,13 +3352,14 @@ class MC {
 	getEffectVirtual(component, iteratorKey = '') {
 		const key = this.generateComponentKey(component, iteratorKey);
 		const parentKey = this.getCurrentRenderingInstance();
+		const effectSeparator = this.getEffectParentSeparator();
 
 		let virtual = null;
 
 		virtual = this.effectCollection.get(key);
 
 		if (!virtual) {
-			virtual = this.effectCollection.get(`${key}__${parentKey}`);
+			virtual = this.effectCollection.get(`${key}${effectSeparator}${parentKey}`);
 		}
 
 		if (virtual) {
@@ -3410,100 +3377,27 @@ class MC {
 		return (hash >>> 0).toString(36);
 	}
 
-	// Рекурсивная сериализация для хеша
-	serializeForHash(value) {
-		if (value == null) return 'null';
-		if (typeof value === 'string') return `"${value}"`;
-		if (typeof value === 'number' || typeof value === 'boolean') return String(value);
-		if (Array.isArray(value)) {
-			return '[' + value.map((v) => this.serializeForHash(v)).join(',') + ']';
-		}
-		if (typeof value === 'object') {
-			const keys = Object.keys(value).sort();
-			return '{' + keys.map((k) => `"${k}":${this.serializeForHash(value[k])}`).join(',') + '}';
-		}
-		return String(value);
-	}
-
 	generateKeyFromNormalized(normalized) {
 		const parts = [];
 
 		if (normalized.component) {
-			parts.push(normalized.component.name || normalized.component.toString());
+			parts.push(`component:${normalized.component.name || normalized.component.toString()}`);
 		}
 
-		const typeSignature = (value) => {
-			const seen = new WeakSet();
+		const propKeys = normalized.props ? Object.keys(normalized.props).sort() : [];
+		parts.push(`props:${propKeys.join(',')}`);
 
-			const sig = (v) => {
-				if (v === null) return 'null';
-				if (v === undefined) return 'undefined';
+		const stateKeys = (normalized.states || []).map((state, index) => {
+			if (!state) {
+				return `state:${index}`;
+			}
 
-				const t = typeof v;
-				if (t === 'string') return 'string';
-				if (t === 'number') return Number.isNaN(v) ? 'nan' : 'number';
-				if (t === 'boolean') return 'boolean';
-				if (t === 'function') return 'function';
-				if (t === 'symbol') return 'symbol';
-				if (t === 'bigint') return 'bigint';
-
-				// объекты сложнее
-				if (v instanceof Date) return 'Date';
-				if (v instanceof RegExp) return 'RegExp';
-				if (v instanceof Map) {
-					// типы ключей/значений в Map
-					const keyTypes = [];
-					const valTypes = [];
-					for (const [k, val] of v.entries()) {
-						keyTypes.push(sig(k));
-						valTypes.push(sig(val));
-					}
-					return `Map<${uniqueSorted(keyTypes).join(',')}|${uniqueSorted(valTypes).join(',')}>`;
-				}
-				if (v instanceof Set) {
-					const elTypes = [];
-					for (const el of v.values()) elTypes.push(sig(el));
-					return `Set<${uniqueSorted(elTypes).join(',')}>`;
-				}
-				if (Array.isArray(v)) {
-					if (seen.has(v)) return 'Array<...>'; // защита от циклов
-					seen.add(v);
-					const elemTypes = v.map(sig);
-					return `Array<${uniqueSorted(elemTypes).join(',')}>`;
-				}
-				// Plain object
-				if (t === 'object') {
-					if (seen.has(v)) return 'Object<...>'; // защита от циклов
-					seen.add(v);
-					const keys = Object.keys(v).sort();
-					// Для каждого ключа берем подпись типа значения — сохраняем имена ключей,
-					// потому что обычно они значимы для props. (Если нужно игнорировать имена —
-					// можно заменить на uniqueSorted(types) ).
-					const pairs = keys.map((k) => `${k}:${sig(v[k])}`);
-					return `{${pairs.join(',')}}`;
-				}
-
-				// fallback
-				return t;
-			};
-
-			// helper: уникализировать и отсортировать набор типов (для порядка)
-			const uniqueSorted = (arr) => Array.from(new Set(arr)).sort();
-
-			return sig(value);
-		};
-
-		if (normalized.props && Object.keys(normalized.props).length > 0) {
-			parts.push(typeSignature(normalized.props));
-		}
-
-		if (normalized.states && normalized.states.length > 0) {
-			// states — массив объектов { value, ... } — учитываем ТОЛЬКО типы value
-			parts.push('[' + normalized.states.map((s) => typeSignature(s && s.value)).join('|') + ']');
-		}
+			return state.traceKey || state.nameProp || state.id || `state:${index}`;
+		});
+		parts.push(`states:${stateKeys.join('|')}`);
 
 		if (normalized.context) {
-			parts.push(typeSignature(normalized.context));
+			parts.push(`context:${normalized.context.key || normalized.context.id || 'anonymous_context'}`);
 		}
 
 		return this.hashString(parts.join('|'));
@@ -3614,15 +3508,19 @@ class MC {
 
 		const rndInstance = this.getCurrentRenderingInstance();
 
-		const uniqueKey = rndInstance ? `${rndInstance}_${normalized.key}` : normalized.key;
+		const uniqueKey = this.joinTreeKeys(rndInstance, normalized.key);
 		normalized.key = uniqueKey;
 
 		// Поиск существующего компонента
 		if (this.componentCollection.has(normalized.key)) {
 			const virtual = this.componentCollection.get(normalized.key);
-			virtual.normalized.props = normalized.props;
 
-			return this.engine.rerender(virtual, 'mc_component');
+			if (!virtual?.HTML || !virtual.HTML.isConnected) {
+				this._cleanupComponentByKey(normalized.key, true);
+			} else {
+				virtual.normalized.props = normalized.props;
+				return this.engine.rerender(virtual, 'mc_component');
+			}
 		}
 
 		const id = this.uuidv4();
