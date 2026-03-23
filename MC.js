@@ -1,7 +1,7 @@
 /// <reference types="./types/mc.d.ts" />
 //TODO v8 = batched render / microtask queue;
 
-//MCv7.13
+//MCv7.15
 class MCState {
 	/**
 	 * id состояния
