@@ -1,7 +1,7 @@
 /// <reference types="./types/mc.d.ts" />
 //TODO v8 = batched render / microtask queue;
 
-//MCv7.15
+//MCv7.16
 class MCState {
 	/**
 	 * id состояния
@@ -2789,7 +2789,7 @@ class MC {
 			this.effectCollection.delete(ekey);
 		}
 
-		if (VDOM.HTML.isConnected && VDOM.HTML.tagName === 'MC') {
+		if (VDOM.HTML?.isConnected && VDOM.HTML.tagName === 'MC') {
 			VDOM.HTML.remove();
 		}
 
@@ -2899,8 +2899,19 @@ class MC {
 			node = walker.nextNode();
 		}
 
-		for (const key of fnKeys) this._cleanupFunctionContainerByKey(key, true);
-		for (const key of compKeys) this._cleanupComponentByKey(key, true);
+		for (const key of fnKeys) {
+			const vdom = this.fcCollection.get(key);
+			if (!vdom) continue;
+			if (vdom.HTML && vdom.HTML.isConnected) continue;
+			this._cleanupFunctionContainerByKey(key, true);
+		}
+
+		for (const key of compKeys) {
+			const vdom = this.componentCollection.get(key);
+			if (!vdom) continue;
+			if (vdom.HTML && vdom.HTML.isConnected) continue;
+			this._cleanupComponentByKey(key, true);
+		}
 	}
 
 	cleanupComponent(key, force = false) {
